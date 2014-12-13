@@ -4,7 +4,7 @@
 /* Change Log is available at the end of file */
 /* Use "ci -l cttex.c" to add comments        */
 
-/* $Header: /export/home/vuthi/C/cttex120-pre3/RCS/cttex.c,v 1.20 1999/05/13 13:33:44 vuthi Exp vuthi $
+/* $Header: /export/home/vuthi/C/cttex121/RCS/cttex.c,v 1.21 1999/05/19 13:23:13 vuthi Exp vuthi $
 */
 
 /* Maximum length of input line */
@@ -22,6 +22,9 @@
 #define NOTMIDDLE(x) \
 		((x)<0xD0?0:(levtable[(x)-0xD0]!=0))
 
+#define GETLENGTH(x) \
+		((x)<-100?-(x)-100:((x)<0?-(x):(x)))
+
 /* Never change this value. If you do, make sure it's below 255. */
 #define CUTCODE 254
 
@@ -30,6 +33,7 @@
 
 #define LISTSTACKDEPTH 100
 #define CUTLISTSIZE 100
+#define DIFLISTSIZE 100
 
 #include <stdio.h>
 #include <string.h>
@@ -50,6 +54,10 @@ int moveleft( int );
 void push_stack( int *, int, int );
 void show_stack( unsigned char * );
 void clear_stack( );
+void check_dif( int *base, int *list, unsigned char *str );
+void clear_dif( );
+void show_dif( unsigned char * );
+void insert_dif( int, int );
 
 /* Table Look-Up for level of a character */
 /* only those in the range D0-FF */
@@ -61,6 +69,7 @@ int levtable[] = {
 
 int cutcode, r_cutcode;
 int bShowAll, debugmode, reportmode, firstmode;
+int bIndexMode, bMinWords;
 unsigned char *mystr;
 int minerr, minword;
 int *bestcutlist;
@@ -68,6 +77,8 @@ int bStopNow;
 int iLineNumber;
 int ListStack[LISTSTACKDEPTH][CUTLISTSIZE];
 int iListStackPointer;
+int piDifList[2 * DIFLISTSIZE];
+int iDifPtr;
 
 /* main() : Wrapper for Thai LaTeX */
 int main( argc, argv )
@@ -82,12 +93,13 @@ char *argv[];
 	int ret;
 
 	cutcode = CUTCODE;
-	bShowAll = 0;         /* HightLight Mode */
+	bShowAll = 0;
+	bIndexMode = 0;
 	debugmode = 0;
 	reportmode = 0;
 	firstmode = 0;
 
-	fprintf( stderr, "C-TTeX $Revision: 1.20 $\n" );
+	fprintf( stderr, "C-TTeX $Revision: 1.21 $\n" );
 	fprintf( stderr, "cttex -h for help usage.\n" );
 	fprintf( stderr, "Built-in dictionary size: %d words\n", numword );
 
@@ -114,6 +126,8 @@ char *argv[];
 				printf( " 1-253 : Run in filter mode, words are separated\n" );
 				printf( "         with the given code.\n" );
 				printf( " -a    : Show all possible separation patterns\n" );
+				printf( " -i    : Index Mode. Similar to -a with minimal output\n" );
+				printf( " -m    : Show only minimal number of words for -a and -i\n" );
 				printf( " -w    : Separate words by <WBR>\n" );
 				printf( " -r    : Report unknown words to STDERR\n" );
 				printf( " -d    : Show debug messages\n" );
@@ -129,6 +143,19 @@ char *argv[];
 			case 'a':
 				bShowAll = 1;
 				fprintf( stderr, "ShowAll Mode\n" );
+				break;
+			case 'i':
+				bIndexMode = 1;
+				fprintf( stderr, "IndexMode Mode\n" );
+				break;
+			case 'm':
+				if ( bShowAll || bIndexMode ) {
+					bMinWords = 1;
+					fprintf( stderr, "Show only Minimal Words\n" );
+				} else {
+					fprintf( stderr, "-m must be after -a or -i\n" );
+					exit( 1 );
+				}
 				break;
 			case 'd':
 				debugmode = 1;
@@ -566,7 +593,7 @@ int dooneline2( unsigned char *in, unsigned char *out ) {
 				minerr = minword = 9999;
 				bStopNow = 0;
 				dooneline2sub( temp, cutlist, 0, 0, 0 );
-				if ( bShowAll )
+				if ( bShowAll || bIndexMode )
 					show_stack( temp );
 				j += docut( temp, out + j, bestcutlist );
 				jt = 0;
@@ -584,7 +611,7 @@ int dooneline2( unsigned char *in, unsigned char *out ) {
 		minerr = minword = 9999;
 		bStopNow = 0;
 		dooneline2sub( temp, cutlist, 0, 0, 0 );
-		if ( bShowAll )
+		if ( bShowAll || bIndexMode )
 			show_stack( temp );
 		j += docut( temp, out + j, bestcutlist );
 	}
@@ -684,14 +711,23 @@ int dooneline2sub( unsigned char *in, int *cutlist, int cutpoint, int curerr,
 			}
 		} /* Not Debug Mode */
 
-		if ( bShowAll )
-			push_stack( cutlist, cutpoint, count );
+
+		if ( bShowAll || bIndexMode ) {
+			if ( bMinWords ) {
+				if ( count < minword )
+					clear_stack( );
+				if ( count <= minword )
+					push_stack( cutlist, cutpoint, count );
+			} else
+				push_stack( cutlist, cutpoint, count );
+		}
 
 		if ( count <= minword ) {
 			minword = count;
 			for ( i = 0; i<cutpoint; i++ )
 				bestcutlist[i] = cutlist[i];
 		}
+
 		if ( debugmode )
 			printf( "Err(%d) Word(%d)\n", minerr, count );
 
@@ -721,6 +757,8 @@ void show_stack( unsigned char *str ) {
 	unsigned char *temp;
 
 	temp = malloc( strlen( ( char * ) str ) * 2 );
+	if ( bIndexMode )
+		clear_dif( );
 	for ( i = 0; i<iListStackPointer; i++ ) {
 		docut( str, temp, ListStack[i] );
 		j = 0;
@@ -729,10 +767,97 @@ void show_stack( unsigned char *str ) {
 				temp[j] = 32;
 			j++;
 		}
-		printf( "%d[%d]: %s\n", i,
+		if ( bShowAll )
+			printf( "%d[%d]: %s\n", i,
 			ListStack[i][CUTLISTSIZE - 1], temp );
+		if ( bIndexMode )
+			check_dif( bestcutlist, ListStack[i], str );
 	}
+	if ( bIndexMode )
+		show_dif( str );
 	free( temp );
+}
+
+/* Display only part of 'list' which does not match 'base' */
+void check_dif( int *base, int *list, unsigned char *str ) {
+	int iBaseItem, iListItem;
+	int iBasePtr, iBaseLength;
+	int iListPtr, iListLength;
+	int start;
+
+	iBaseItem = iListItem = 0;
+	iBasePtr = iListPtr = 0;
+
+	while ( str[iBasePtr] ) {
+		iBaseLength = base[iBaseItem];
+		iBaseLength = GETLENGTH( iBaseLength );
+
+		iListLength = list[iListItem];
+		iListLength = GETLENGTH( iListLength );
+
+		if ( iListLength != iBaseLength ) { /* Found ! */
+			start = iBasePtr;
+			iBasePtr += iBaseLength;
+			iListPtr += iListLength;
+			insert_dif( start, iListPtr );
+			start = iListPtr;
+			while ( iBasePtr != iListPtr ) {
+				if ( iBasePtr > iListPtr ) {
+					iListItem++;
+					iListPtr += GETLENGTH( list[iListItem] );
+					insert_dif( start, iListPtr );
+					start = iListPtr;
+				} else if ( iBasePtr < iListPtr ) {
+					iBaseItem++;
+					iBasePtr += GETLENGTH( base[iBaseItem] );
+				}
+			}
+		} else {
+			iBasePtr += iBaseLength;
+			iListPtr += iListLength;
+		}
+		iBaseItem++;
+		iListItem++;
+	}
+}
+
+void clear_dif( ) {
+	iDifPtr = 0;
+}
+
+void show_dif( unsigned char *str ) {
+	int i, start;
+	i = 0;
+	while ( i<iDifPtr ) {
+		start = piDifList[i];
+		while ( start < piDifList[i + 1] )
+			fputc( str[start++], stdout );
+		fputc( ':', stdout );
+		i += 2;
+	}
+	/*
+	if(iDifPtr)
+	fputc('\n',stdout);
+	*/
+}
+
+/* Never insert a pair already exists */
+void insert_dif( int start, int stop ) {
+	int i;
+	i = 0;
+	while ( i<iDifPtr ) {
+		if ( start == piDifList[i] &&
+			stop == piDifList[i + 1] )
+			return;
+		i += 2;
+	}
+	piDifList[i] = start;
+	piDifList[i + 1] = stop;
+	iDifPtr += 2;
+	if ( iDifPtr >= DIFLISTSIZE ) {
+		fprintf( stderr, "Not Enough DifList\n" );
+		exit( 1 );
+	}
 }
 
 void clear_stack( ) {
@@ -741,6 +866,10 @@ void clear_stack( ) {
 
 /*
 * $Log: cttex.c,v $
+* Revision 1.21  1999/05/19 13:23:13  vuthi
+* Add -i and -m
+* use unsigned short for map[]
+*
 * Revision 1.20  1999/05/13 13:33:44  vuthi
 * New findword() algorithm using DFA.
 * Code cleanup.

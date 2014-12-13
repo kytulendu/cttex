@@ -206,7 +206,7 @@ void prmap( ) {
 	printf( "Writing Map File...\n" );
 
 	FP = fopen( "map.c", "w" );
-	fprintf( FP, "int map[] = {\n" );
+	fprintf( FP, "unsigned short map[] = {\n" );
 	for ( i = 0; i<maxstate; i++ ) {
 		min = max = 0;
 		for ( j = mincol; j <= maxcol; j++ ) {
@@ -266,7 +266,7 @@ void prmap( ) {
 	fprintf( FP, "int mincol = %d;\n", mincol );
 	fprintf( FP, "int maxcol = %d;\n", maxcol );
 	fprintf( FP, "int maxstate = %d;\n", maxstate );
-	fprintf( FP, "extern int map[%d];\n", offset );
+	fprintf( FP, "extern unsigned short map[%d];\n", offset );
 	fprintf( FP, "extern unsigned char state[%d];\n", maxstate );
 	fprintf( FP, "extern unsigned char state_min[%d];\n", maxstate );
 	fprintf( FP, "extern unsigned char state_max[%d];\n", maxstate );
