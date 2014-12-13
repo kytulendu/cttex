@@ -2,7 +2,7 @@
 /* By Vuthichai A.                   */
 
 #define DICTFILE "tdict.txt"
-#define MAXWORD 12000
+#define MAXWORD 50000
 #define MAXWORDLENGTH 30
 #define MAXLINELENGTH 400
 
@@ -10,7 +10,14 @@
 #include <string.h>
 #include <stdlib.h>
 
+int levtable[] = {
+	0, 2, 0, 0, 2, 2, 2, 2, 1, 1, 1, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 2, 3, 3, 3, 3, 3, 2, 3, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0
+};
+
 void readfile( unsigned char * );
+void fixline( unsigned char * );
 void dooneline( unsigned char *, unsigned char * );
 int findword( unsigned char * );
 
@@ -26,7 +33,7 @@ main( ) {
 	numword = 0;
 	readfile( DICTFILE );
 
-	fp = fopen( "tdict.new", "w" );
+	fp = fopen( "tdict.sorted", "w" );
 	for ( i = 0; i<numword; i++ ) {
 		/* Remove duplicate words */
 		if ( i<numword - 1 ) {
@@ -52,6 +59,7 @@ void readfile( unsigned char *fname ) {
 	while ( !feof( fp ) ) {
 		fgets( str, MAXWORDLENGTH - 1, fp );
 		if ( !feof( fp ) ) {
+			fixline( str );
 			wordptr[numword] = ( unsigned char * ) malloc( ( l = strlen( str ) ) + 2 );
 			if ( wordptr[numword] == NULL )
 				printf( "Memory Error\n" );
@@ -70,10 +78,49 @@ void readfile( unsigned char *fname ) {
 					wordptr[i] = ostr;
 				}
 			numword++;
-			if ( numword % 100 == 0 )
-				printf( "%d", numword );
+			if ( numword % 500 == 0 )
+				printf( "%d\n", numword );
 		}
 	}
 	fclose( fp );
 	printf( "Reading dictionary done.\n" );
+}
+
+
+void fixline( line )
+unsigned char *line;
+{
+	unsigned char top, up, middle, low;
+	unsigned char out[MAXLINELENGTH];
+	int i, j, c;
+
+	i = j = 0;
+	strcpy( out, line );
+	top = up = middle = low = 0;
+	while ( c = out[i++] ) {
+		switch ( ( c>0xD0 ) ? levtable[c - 0xD0] : 0 ) {
+		case 0:
+			if ( middle ) {
+				line[j++] = middle;
+				if ( low ) line[j++] = low;
+				if ( up )  line[j++] = up;
+				if ( top ) line[j++] = top;
+			}
+			top = up = middle = low = 0;
+			middle = c; break;
+		case 1:
+			low = c; break;
+		case 2:
+			up = c; break;
+		case 3:
+			top = c; break;
+		}
+	}
+	if ( middle ) {
+		line[j++] = middle;
+		if ( low ) line[j++] = low;
+		if ( up )  line[j++] = up;
+		if ( top ) line[j++] = top;
+	}
+	line[j] = 0;
 }

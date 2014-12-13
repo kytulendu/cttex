@@ -13,6 +13,7 @@ ENDEND
 $c = 0;
 while(<>) {
   chop;
+  next if /^\s*$/;
   $i = length($_);
   print ",\n" if $c;
   printf "\"\\x%02X%s\"", $i, $_;

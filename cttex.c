@@ -2,8 +2,9 @@
 /* By Vuthichai A.                            */
 /* vuthi@ctrl.titech.ac.jp                    */
 /* Change Log is available at the end of file */
+/* Use "ci -l cttex.c" to add comments        */
 
-/* $Header: /home/vuthi/ttex/cttex/RCS/cttex.c,v 1.16 1996/09/01 13:34:49 vuthi Exp vuthi $
+/* $Header: /home/vuthi/ttex/cttex/RCS/cttex.c,v 1.17 1997/01/04 15:15:08 vuthi Exp vuthi $
 */
 
 /* Maximum number of words in the dictionary */
@@ -34,10 +35,11 @@
 		((x)<0xD0?0:(levtable[(x)-0xD0]!=0))
 
 /* Never change this value. If you do, make sure it's below 255. */
-#define	CUTCODE 254
+#define CUTCODE 254
 
 /* Set this one will reduce output size with new TeX */
-#define HIGHBIT 1
+#define HIGHBIT 0
+
 
 #include <stdio.h>
 #include <string.h>
@@ -47,10 +49,11 @@
 /* Load Dictionary : wordptr & numword */
 #include "tdict.h"
 
-void dooneline( unsigned char *, unsigned char * );
+int dooneline( unsigned char *, unsigned char * );
 void savestatus( int*, int*, int*, int*, int*, int*, unsigned char *, int );
 void adj( unsigned char * );
-void filter( unsigned char * );
+void fixline( unsigned char * );
+int filter( unsigned char * );
 int mystrncmp( unsigned char *, unsigned char *, int );
 int findword( unsigned char *, int * );
 int countmatch( unsigned char *in, unsigned char *out );
@@ -64,7 +67,7 @@ int levtable[] = {
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0
 };
 
-int cutcode;
+int cutcode, r_cutcode;
 
 
 /* main() : Wrapper for Thai LaTeX */
@@ -77,10 +80,11 @@ char *argv[];
 	unsigned char *retval;
 	int i, j, thaimode, c, cr;
 	int testmode = 0;
+	int ret;
 
 	cutcode = CUTCODE;
 
-	fprintf( stderr, "C-TTeX $Revision: 1.16 $\n" );
+	fprintf( stderr, "C-TTeX $Revision: 1.17 $\n" );
 	fprintf( stderr, "Usage : cttex [cutcode] < infile > outfile\n" );
 	fprintf( stderr, "Usage : cutcode=0 forces operation in HTML mode.\n" );
 	fprintf( stderr, "Built-in dictionary size: %d words\n", numword );
@@ -91,6 +95,10 @@ char *argv[];
 			if ( cutcode ) {		/* Test with given code */
 				testmode = 1;
 				fprintf( stderr, "Filter mode, cut code = %d\n", cutcode );
+				r_cutcode = cutcode;
+
+				/* Always use 254 to avoid problem with cutcode+1 */
+				cutcode = CUTCODE;
 			} else {			/* HTML mode : use <WBR> code */
 				cutcode = CUTCODE;
 				testmode = 2;
@@ -104,10 +112,21 @@ char *argv[];
 	thaimode = cr = 0;
 	while ( !feof( fp ) ) {
 		retval = fgets( str, MAXLINELENGTH - 1, fp );
+		fixline( str );
 		if ( !feof( fp ) ) {
 			if ( testmode ) {               /* Non-TeX mode */
 				if ( testmode == 1 ) {          /* Break with given code */
-					dooneline( str, out );
+					if ( dooneline( str, out ) )
+						fprintf( stderr,
+						"Above unknown word(s) are in line : %d\n%d:%s---\n",
+						i + 1, i + 1, out );
+					/* Change cutcode to r_cutcode */
+					j = strlen( out );
+					while ( j >= 0 ) {
+						if ( out[j] == cutcode )
+							out[j] = r_cutcode;
+						j--;
+					}
 					printf( "%s", out );
 				} else {                     /* Break with <WBR> tag */
 					dooneline( str, out );
@@ -210,11 +229,12 @@ char *argv[];
 				}
 			}
 			i++;
-			if ( i % 10 == 0 )
+			if ( ( testmode != 1 ) && ( i % 10 == 0 ) )
 				fprintf( stderr, "\r%4d", i );
 		}
 	}
-	fprintf( stderr, "\r%4d\n", i );
+	if ( testmode != 1 )
+		fprintf( stderr, "\r%4d\n", i );
 	if ( cr && thaimode ) {
 		putchar( '}' );
 		putchar( '\n' );
@@ -225,7 +245,7 @@ char *argv[];
 }
 
 /* Word sep goes here */
-void dooneline( unsigned char *in, unsigned char *out ) {
+int dooneline( unsigned char *in, unsigned char *out ) {
 	int i, j, k, l, old_i;
 	int wlist[MW], poslist[MW], jlist[MW], windex;
 	int pos, fence, backmode;
@@ -337,7 +357,7 @@ void dooneline( unsigned char *in, unsigned char *out ) {
 
 	/* Sth to do with words not in dict */
 	/* (Remove 'cutcode+1') */
-	filter( out );
+	return filter( out );
 }
 
 /* Sequential verion */
@@ -484,8 +504,9 @@ int l;
 }
 
 /* What to do with words outside dictionary */
-void filter( unsigned char *line ) {
-	int i, j, c, a, found;
+/* Return non-zero if unknown words found   */
+int filter( unsigned char *line ) {
+	int i, j, k, c, a, found, pr;
 	unsigned char str[MAXLINELENGTH];
 
 	strcpy( str, line );
@@ -494,26 +515,92 @@ void filter( unsigned char *line ) {
 	while ( c = str[i] ) {
 		if ( c == cutcode ) {
 			a = i;
-		} else if ( c == cutcode + 1 ) {
+		}
+		/* Change position of cutcode+1 from "end" of unknown to "begin" of
+		unknown */
+		else if ( c == cutcode + 1 ) {
 			found = 1;
+
+			/* Insert a cutcode if this doesn't end Thai string */
 			if ( !SKIPWORD( str[i + 1] ) )
 				str[i] = cutcode;
-			if ( a >= 0 ) {
-				str[a] = cutcode + 1;
+			/* Try to insert cutcode+1 at the beginning of unknown */
+			if ( a >= 0 ) {             /* Found cutcode before ? */
+				str[a] = cutcode + 1;  /* Just replace it        */
 				a = -1;
+			} else {                 /* Else find start of word the boundary */
+				j = i;
+				while ( j ) {
+					if ( SKIPWORD( str[j - 1] ) ) {
+						break;
+					}
+					j--;
+				}
+				k = strlen( str );
+				str[k + 1] = 0;
+				while ( k>j ) {
+					str[k] = str[k - 1];
+					k--;
+				}
+				str[j] = cutcode + 1;
+				i++;
 			}
 		} else if ( SKIPWORD( c ) ) {
 			a = -1;
 		}
 		i++;
 	}
+
 	if ( found ) {
-		i = j = 0;
-		while ( c = str[i++] )
+		pr = i = j = 0;
+		while ( c = str[i++] ) {
 			if ( c != cutcode + 1 )
 				line[j++] = c;
+			if ( c == cutcode + 1 )
+				pr = 1;
+			else if ( pr && ( c == cutcode || SKIPWORD( c ) ) ) {
+				pr = 0;
+				fputc( '\n', stderr );
+			} else if ( pr )
+				fputc( c, stderr );
+			/* fprintf(stderr,"%c(%d)",c,c); */
+		}
 		line[j] = 0;
 	}
+	return found;
+}
+
+void fixline( line )
+unsigned char *line;
+{
+	unsigned char top, up, middle, low;
+	unsigned char out[MAXLINELENGTH];
+	int i, j, c;
+
+	i = j = 0;
+	strcpy( out, line );
+	top = up = middle = low = 0;
+	while ( c = out[i++] ) {
+		switch ( ( c>0xD0 ) ? levtable[c - 0xD0] : 0 ) {
+		case 0:
+			if ( middle ) {
+				line[j++] = middle;
+				if ( low ) line[j++] = low;
+				if ( up )  line[j++] = up;
+				if ( top ) line[j++] = top;
+
+				top = up = middle = low = 0;
+			}
+			middle = c; break;
+		case 1:
+			low = c; break;
+		case 2:
+			up = c; break;
+		case 3:
+			top = c; break;
+		}
+	}
+	line[j] = 0;
 }
 
 /* Old one by Fong (Completely Removed)
@@ -639,6 +726,13 @@ int moveleft( int c ) {
 
 /*
 * $Log: cttex.c,v $
+* Revision 1.17  1997/01/04 15:15:08  vuthi
+* - Always uses cutcode = 254 in the real word-sep routine
+*   Given cutcode is applied after that.
+*   This is to avoid cutcode+1 falls into other character
+* - In test mode (cutcode <> 0), also report unknown words
+*   on stderr. -> Simple spelling checker
+*
 * Revision 1.16  1996/09/01 13:34:49  vuthi
 * In HTML mode :
 *   Surround Thai Text with <NOBR> tags, to allow use of <WBR>
@@ -688,9 +782,10 @@ int moveleft( int c ) {
 * Bug of newline disappear at the end of Thai line
 *
 * Revision 1.4  1994/12/14  10:50:18  vuthi
-* Command Line Option, use "%" to terminal Thai lines
+* Command Line Option, use "%" to terminate Thai lines
 *
 * Revision 1.3  1994/12/14  10:12:22  vuthi
 * Add Header Revision and Log
 *
 */
+
