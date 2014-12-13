@@ -1,12 +1,10 @@
-/* Thai word-separator by dictionary */
-/* By Vuthichai A.                   */
-/* --------------------------------- */
+/* Thai word-separator by dictionary          */
+/* By Vuthichai A.                            */
+/* vuthi@ctrl.titech.ac.jp                    */
+/* Change Log is available at the end of file */
 
-/* $Header: /home/hodaka/vuthi/tex/thai/hui/RCS/cttex.c,v 1.4 1994/12/14 10:50:18 vuthi Exp vuthi $
+/* $Header: /home/vuthi/ttex/cttex/RCS/cttex.c,v 1.15 1995/10/06 13:09:52 vuthi Exp vuthi $
 */
-
-/* Name of dictionary file */
-#define DICTFILE "tdict.txt"
 
 /* Maximum number of words in the dictionary */
 #define MAXWORD 15000
@@ -18,7 +16,7 @@
 #define MAXLINELENGTH 1000
 
 /* Maximum number of WORDS in one line */
-#define MW 40
+#define MW 60
 
 /* Maximum number of words to LOOKBACK */
 #define BACKDEPTH 3
@@ -35,93 +33,156 @@
 #define NOTMIDDLE(x) \
 		((x)<0xD0?0:(levtable[(x)-0xD0]!=0))
 
-#define	CUTCODE	254
+/* Never change this value. If you do, make sure it's below 255. */
+#define CUTCODE 254
+
+/* Set this one will reduce output size with new TeX */
+#define HIGHBIT 1
 
 #include <stdio.h>
 #include <string.h>
+#include <memory.h>
 #include <stdlib.h>
 
-void readfile( unsigned char * );
+/* Load Dictionary : wordptr & numword */
+#include "tdict.h"
+
 void dooneline( unsigned char *, unsigned char * );
 void savestatus( int*, int*, int*, int*, int*, int*, unsigned char *, int );
+void adj( unsigned char * );
+void filter( unsigned char * );
 int mystrncmp( unsigned char *, unsigned char *, int );
 int findword( unsigned char *, int * );
 int countmatch( unsigned char *in, unsigned char *out );
-void adj( unsigned char * );
+int moveleft( int );
 
 /* Table Look-Up for level of a character */
-/*
-int levtable[]={
-0,2,0,0,2,2,2,2,1,1,1,2,0,0,0,0,
-0,0,0,0,0,0,0,3,3,3,3,3,3,3,3,0,
-0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-};
-*/
+/* only those in the range D0-FF */
 int levtable[] = {
 	0, 2, 0, 0, 2, 2, 2, 2, 1, 1, 1, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 2, 3, 3, 3, 3, 3, 3, 3, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+	0, 0, 0, 0, 0, 0, 0, 2, 3, 3, 3, 3, 3, 2, 3, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0
 };
 
-/* Pointer to each dictionary words */
-unsigned char *wordptr[MAXWORD];
-/* Number of words read into memory */
-int numword;
 int cutcode;
 
+
+/* main() : Wrapper for Thai LaTeX */
 int main( argc, argv )
 int argc;
 char *argv[];
 {
 	FILE *fp, *fopen( );
 	unsigned char str[MAXLINELENGTH], out[MAXLINELENGTH];
+	unsigned char *retval;
 	int i, j, thaimode, c, cr;
+	int testmode = 0;
 
-	numword = 0;
 	cutcode = CUTCODE;
 
-	fprintf( stderr, "C-TTeX $Revision: 1.4 $\n" );
-	if ( argc>1 ) {
-		sscanf( argv[1], "%d", &cutcode );
-	}
+	fprintf( stderr, "C-TTeX $Revision: 1.15 $\n" );
+	fprintf( stderr, "Usage : cttex [cutcode] < infile > outfile\n" );
+	fprintf( stderr, "Usage : cutcode=0 forces operation in HTML mode.\n" );
+	fprintf( stderr, "Built-in dictionary size: %d words\n", numword );
 
-	readfile( DICTFILE );
+	for ( i = 1; i<argc; i++ ) {
+		if ( ( argv[i][0] >= '0' ) && ( argv[i][0] <= '9' ) ) {
+			sscanf( argv[i], "%d", &cutcode );
+			if ( cutcode ) {		/* Test with given code */
+				testmode = 1;
+				fprintf( stderr, "Filter mode, cut code = %d\n", cutcode );
+			} else {			/* HTML mode : use <WBR> code */
+				cutcode = CUTCODE;
+				testmode = 2;
+				fprintf( stderr, "HTML mode\n" );
+			}
+		}
+	}
 
 	i = 0;
 	fp = stdin;
 	thaimode = cr = 0;
 	while ( !feof( fp ) ) {
-		fgets( str, MAXLINELENGTH - 1, fp );
+		retval = fgets( str, MAXLINELENGTH - 1, fp );
 		if ( !feof( fp ) ) {
-			dooneline( str, out );
-			if ( argc>1 ) {
-				printf( "%s", out );
-			} else {
-				adj( out );			/* Choose appropriate WANNAYUK */
-				j = 0;
-				while ( c = out[j] ) {
-					if ( !HIGHWORD( c ) && ( j == 0 ) && cr && thaimode ) {
-						putchar( '}' );
-						putchar( ' ' );
-						cr = thaimode = 0;
+			if ( testmode ) {
+				if ( testmode == 1 ) {
+					dooneline( str, out );
+					printf( "%s", out );
+				} else {
+					dooneline( str, out );
+					j = 0;
+					while ( c = out[j] ) {
+						if ( c == cutcode ) {
+							putchar( '<' );
+							putchar( 'W' );
+							putchar( 'B' );
+							putchar( 'R' );
+							putchar( '>' );
+						} else
+							putchar( c );
+						j++;
 					}
-					if ( thaimode ) {
-						if ( c == '\n' ) {
+				}
+			} else {
+				dooneline( str, out );
+				adj( out );		/* Choose appropriate WANNAYUK */
+				j = 0;
+				while ( ( c = ( int ) out[j] ) != 0 ) {
+					if ( cr && thaimode ) {
+						if ( j != 0 ) {
+							fprintf( stderr, "\nLine %d doesn't end with NL\n", i + 1 );
+							fprintf( stderr, "%d found after NL\n", c );
+							fprintf( stderr, "BUG !! : Please report\n" );
+							fprintf( stderr, "%sXXXXX\n", out );
+						}
+						if ( HIGHWORD( c ) ) {
 							/* Add a % before newline in Thai Mode */
 							putchar( '%' );
 							putchar( '\n' );
-							cr = 1;	/* We got a CR in Thai mode */
-						} else if ( !HIGHWORD( c ) ) {
+						} else {
+							putchar( '}' );
+							putchar( '\n' );
+							thaimode = 0;
+						}
+						cr = 0;
+					}
+
+					/* Thai Mode */
+					if ( thaimode ) {              /* We got a CR in Thai mode */
+						if ( c == '\n' ) {
+							cr = 1;		      /* Mark Flag */
+						} else if ( !HIGHWORD( c ) ) {   /* Leave ThaiMode */
 							putchar( '}' );
 							putchar( c );
 							thaimode = 0;
-						} else
-							printf( "\\c%03d", c );
-					} else {
-						if ( !HIGHWORD( c ) )
+						} else {                    /* Remain in ThaiMode */
+							if ( c == CUTCODE )
+								printf( "\\tb " );
+							else {
+								if ( HIGHBIT )
+									putchar( c );
+								else
+									printf( "\\c%03d", c );
+							}
+						}
+					}
+
+					/* Not ThaiMode */
+					else {
+						if ( !HIGHWORD( c ) )          /* Just print it out */
 							putchar( c );
-						else {
-							printf( "{\\thai\\c%03d", c );
+						else {                    /* A Thai Char detected */
+							if ( c == CUTCODE ) {        /* Just in case */
+								fprintf( stderr, "\nCutCode found before Thai Characters\n" );
+								fprintf( stderr, "Line %d : BUG !! : Please report\n", i + 1 );
+								printf( "\\tb " );
+							} else {
+								if ( HIGHBIT )
+									printf( "{\\thai %c", c );
+								else
+									printf( "{\\thai\\c%03d", c );
+							}
 							thaimode = 1;
 						}
 					}
@@ -129,45 +190,25 @@ char *argv[];
 				}
 			}
 			i++;
-			if ( i % 100 == 0 )
-				fprintf( stderr, "%d\n", i );
+			if ( i % 10 == 0 )
+				fprintf( stderr, "\r%4d", i );
 		}
+	}
+	fprintf( stderr, "\r%4d\n", i );
+	if ( cr && thaimode ) {
+		putchar( '}' );
+		putchar( '\n' );
 	}
 	fprintf( stderr, "Done\n" );
 
 	return 0;
 }
 
-/* Read dictionary file */
-void readfile( unsigned char *fname ) {
-	FILE *fp, *fopen( );
-	unsigned char str[MAXWORDLENGTH];
-	unsigned char ostr[MAXWORDLENGTH];
-	int l;
-
-	fp = fopen( fname, "r" );
-	ostr[0] = 0;
-	while ( !feof( fp ) ) {
-		fgets( str, MAXWORDLENGTH - 1, fp );
-		if ( !feof( fp ) ) {
-			if ( strcmp( ostr, str ) >= 0 )
-				fprintf( stderr, "Dictionary order error %s %s", ostr, str );
-			wordptr[numword] = ( unsigned char * ) malloc( ( l = strlen( str ) ) + 2 );
-			strcpy( wordptr[numword] + 1, str );
-			strcpy( ostr, str );
-			wordptr[numword][l] = 0;            /* Remove new line */
-			wordptr[numword][0] = l - 1;
-			numword++;
-		}
-	}
-	fclose( fp );
-	fprintf( stderr, "Reading dictionary done. %d\n", numword );
-}
-
+/* Word sep goes here */
 void dooneline( unsigned char *in, unsigned char *out ) {
 	int i, j, k, l, old_i;
-	int wlist[MW], poslist[MW], jlist[MW], windex,
-		pos, fence, backmode;
+	int wlist[MW], poslist[MW], jlist[MW], windex;
+	int pos, fence, backmode;
 	int prev_error = 0;
 
 	i = old_i = j = 0;
@@ -183,23 +224,23 @@ void dooneline( unsigned char *in, unsigned char *out ) {
 		if ( i>old_i )
 			backmode = 0;
 
-		if ( SKIPWORD( in[i] ) ) {                 /* Chars to be skipped ? */
+		if ( SKIPWORD( in[i] ) ) {	        /* Chars to be skipped ? */
 			if ( prev_error ) {
-				/* out[j++] = '!';
-				*/
+				/* Mark words not in dict */
+				out[j++] = cutcode + 1;
 				prev_error = 0;
 			}
-			backmode = fence = windex = 0;          /* Begin new word list */
-			while ( SKIPWORD( in[i] ) && in[i] ) {   /* Skip English char */
+			backmode = fence = windex = 0;        /* Begin new word list */
+			while ( SKIPWORD( in[i] ) && in[i] ) {	/* Skip English char */
 				out[j++] = in[i++];
 			}
 		}
-		if ( in[i] )                             /* Still not EOL ? */
+		if ( in[i] )			        /* Still not EOL ? */
 			do {
-				if ( k = findword( in + i, &pos ) ) {         /* Found in dict */
+				if ( ( k = findword( in + i, &pos ) ) != 0 ) { /* Found in dict */
 					if ( prev_error ) {
-						/* out[j++] = '!';
-						*/
+						/* Mark words not in dict */
+						out[j++] = cutcode + 1;
 						prev_error = 0;
 					}
 					wlist[windex] = i;
@@ -214,7 +255,7 @@ void dooneline( unsigned char *in, unsigned char *out ) {
 						fence = windex - BACKDEPTH;
 					}
 
-					for ( l = 0; l<k; l++ )                /* Copy word */
+					for ( l = 0; l<k; l++ )	/* Copy word */
 						out[j++] = in[i++];
 
 					/* Mai Ya Mok & Pai Yan Noi */
@@ -225,8 +266,10 @@ void dooneline( unsigned char *in, unsigned char *out ) {
 					while ( ( in[i] == 0xE6 ) || ( in[i] == 0xCF ) )
 						out[j++] = in[i++];
 
-					out[j++] = cutcode;                   /* Insert word sep symbol */
-				} else {                            /* Not in Dict */
+					if ( !SKIPWORD( in[i] ) )	/* Make sure it's not the last
+												Thai word */
+												out[j++] = cutcode;	/* Insert word sep symbol */
+				} else {			/* Not in Dict */
 
 					/* Shortening the prev wordS may help */
 					/* Try to Look Back */
@@ -237,9 +280,9 @@ void dooneline( unsigned char *in, unsigned char *out ) {
 							savestatus( &windex, wlist, poslist, jlist, &i, &j, out, 1 );
 							old_i = i;
 						}
-						pos = poslist[windex - 1] - 1;        /* Skip back one word */
+						pos = poslist[windex - 1] - 1; /* Skip back one word */
 						while ( ( pos >= 0 ) &&
-							( l = countmatch( wordptr[pos] + 1, in + wlist[windex - 1] ) ) ) {
+							( ( l = countmatch( wordptr[pos] + 1, in + wlist[windex - 1] ) )>0 ) ) {
 							if ( ( l == wordptr[pos][0] ) &&
 								!NOTMIDDLE( in[wlist[windex - 1] + l] ) ) {
 								k = 1; break;
@@ -263,29 +306,33 @@ void dooneline( unsigned char *in, unsigned char *out ) {
 					}
 					/* Sure that word is not in dictionary */
 					if ( k == 0 ) {
-						prev_error = 1;               /* Begin unknown word area */
-						out[j++] = in[i++];             /* Copy it */
-						backmode = fence = windex = 0;  /* Clear Word List */
+						prev_error = 1;	/* Begin unknown word area */
+						out[j++] = in[i++];	/* Copy it */
+						backmode = fence = windex = 0; /* Clear Word List */
 					}
 				}
 			} while ( ( k == 0 ) && ( !SKIPWORD( in[i] ) ) );
 	}
 	out[j] = 0;
+
+	/* Sth to do with words not in dict */
+	/* (Remove 'cutcode+1') */
+	filter( out );
 }
 
 /* Sequential verion */
 /*
 int findword(unsigned char *in)
 {
-	int i;
+int i;
 
-	for(i=numword-1;i>=0;i--) {
-		if(mystrncmp(in,wordptr[i]+1,wordptr[i][0])==0) {
-			printf("Found : %s %d\n", wordptr[i]+1,wordptr[i][0]);
-			return wordptr[i][0];
-		}
-	}
-	return 0;
+for(i=numword-1;i>=0;i--) {
+if(mystrncmp(in,wordptr[i]+1,wordptr[i][0])==0) {
+printf("Found : %s %d\n", wordptr[i]+1,wordptr[i][0]);
+return wordptr[i][0];
+}
+}
+return 0;
 }
 */
 
@@ -294,6 +341,7 @@ Return  : Length of recognized word, and position of that word in
 dictionary
 Binary search method
 */
+
 int findword( unsigned char *in, int *pos ) {
 	int up, low, mid, a, l;
 
@@ -327,7 +375,7 @@ int findword( unsigned char *in, int *pos ) {
 			if ( !countmatch( wordptr[mid] + 1, in ) )  /* Can we find the shorter word ? */
 				return 0;                         /* No, */
 
-			while ( mid && ( l = countmatch( wordptr[mid] + 1, in ) ) ) {
+			while ( mid && ( ( l = countmatch( wordptr[mid] + 1, in ) )>0 ) ) {
 				if ( ( l == wordptr[mid][0] ) && !NOTMIDDLE( in[l] ) ) {
 					*pos = mid;
 					return l;
@@ -398,13 +446,16 @@ void savestatus( int* windex, int* wlist, int* poslist, int* jlist,
 /* Thai version of strncmp :
 b must be the word from dictionary
 */
+
 int mystrncmp( a, b, l )
 unsigned char *a, *b;
 int l;
 {
 	int i;
 
-	i = strncmp( a, b, l );
+	/*   i=strncmp(a,b,l);
+	*/
+	i = memcmp( a, b, l );
 	if ( i )
 		return i;
 	else {
@@ -412,15 +463,41 @@ int l;
 	}
 }
 
-#define PORPAR 187
-#define FORFAR 189
-#define FORFUN 191
-#define MAITAI 231
-#define MAIHAN 209
-#define SARAAMP 211
-#define YORYING 173
-#define isyol(x) ((x)==PORPAR||(x)==FORFAR||(x)==FORFUN)
+/* What to do with words outside dictionary */
+void filter( unsigned char *line ) {
+	int i, j, c, a, found;
+	unsigned char str[MAXLINELENGTH];
 
+	strcpy( str, line );
+	found = i = 0;
+	a = -1;
+	while ( c = str[i] ) {
+		if ( c == cutcode ) {
+			a = i;
+		} else if ( c == cutcode + 1 ) {
+			found = 1;
+			if ( !SKIPWORD( str[i + 1] ) )
+				str[i] = cutcode;
+			if ( a >= 0 ) {
+				str[a] = cutcode + 1;
+				a = -1;
+			}
+		} else if ( SKIPWORD( c ) ) {
+			a = -1;
+		}
+		i++;
+	}
+	if ( found ) {
+		i = j = 0;
+		while ( c = str[i++] )
+			if ( c != cutcode + 1 )
+				line[j++] = c;
+		line[j] = 0;
+	}
+}
+
+/* Old one by Fong (Completely Removed)
+New one by Hui */
 void adj( line )
 unsigned char *line;
 {
@@ -438,11 +515,21 @@ unsigned char *line;
 		top[i] = up[i] = middle[i] = low[i] = 0;
 
 	i = 0; k = -1;
-	while ( c = line[i++] ) {
+	while ( ( c = line[i++] ) != 0 ) {
 		switch ( ( c>0xD0 ) ? levtable[c - 0xD0] : 0 ) {
 		case 0: /*Middle*/
-			k++;
-			middle[k] = c; break;
+			/* Special Case for Sara-Am */
+			if ( c == 0xD3 ) {
+				if ( k >= 0 ) {
+					up[k] = 0xED;
+				}
+				k++;
+				middle[k] = 0xD2;      /* Put Sara-Ar */
+			} else {
+				k++;
+				middle[k] = c;
+			}
+			break;
 		case 1: /*Low*/
 			low[k] = c; break;
 		case 2: /*Up*/
@@ -452,35 +539,41 @@ unsigned char *line;
 		}
 	}
 
-	/* Beauty Part */
-	/* Check through each condition */
-	for ( i = 0; middle[i] != '\n'; i++ ) {
-		if ( isyol( middle[i] ) && middle[i + 1] != SARAAMP ) {
-			if ( up[i] != 0 ) {
-				if ( up[i] != MAIHAN&&up[i] != MAITAI )
-					up[i] = up[i] - 64; /*SARA for PORPAR*/
-				if ( up[i] == MAITAI )
-					up[i] = up[i] - 84; /*MAITAIKOOL for PORPAR*/
-				if ( up[i] == MAIHAN )
-					up[i] = up[i] - 63; /*MAIHANAREKARD for PORPAR*/
-				if ( top[i] != 0 )
-					top[i] = top[i] - 80; /*MAIEK for PORPAR and SARA*/
-			} else {
-				if ( top[i] != 0 )
-					top[i] = top[i] - 101; /*MAIEK for PORPAR*/
-			}
-		} else {
-			if ( top[i] != 0 && up[i] == 0 && middle[i + 1] != SARAAMP )
-				top[i] = top[i] - 96; /*MAIEK for BORBAIMAI*/
+	/* Beauty Part Begins */
+
+	for ( i = 0; i <= k; i++ ) {
+		/* Move down from Top -> Up */
+		if ( ( top[i] ) && ( up[i] == 0 ) ) {
+			up[i] = top[i] - 96;
+			top[i] = 0;
 		}
-		if ( middle[i] == YORYING&&low[i] != 0 )
-			middle[i] = 144; /*YORYING for SARAUOO*/
-		if ( middle[i + 1] == SARAAMP&&top[i] != 0 )
-			top[i] = top[i] - 80; /*MAIEK for SARAAMP*/
+
+		/* Avoid characters with long tail */
+		if ( middle[i] == 0xBB ||           /* Por Pla */
+			middle[i] == 0xBD ||           /* For Far */
+			middle[i] == 0xBF ) {          /* For Fun */
+			if ( up[i] )
+				up[i] = moveleft( up[i] );
+			if ( top[i] )
+				top[i] = moveleft( top[i] );
+		}
+
+		/* Remove lower part of TorSanTan and YorPhuYing
+		if necessary */
+		if ( middle[i] == 0xB0 && low[i] )    /* TorSanTan */
+			middle[i] = 0x9F;
+		if ( middle[i] == 0xAD && low[i] )    /* YorPhuYing */
+			middle[i] = 0x90;
+
+		/* Move lower sara down , for DorChaDa, TorPaTak */
+		if ( middle[i] == 0xAE ||
+			middle[i] == 0xAF ) {
+			if ( low[i] )
+				low[i] = low[i] + 36;
+		}
 	}
 
-	/* Pack Back To Line */
-
+	/* Pack Back To A Line */
 	i = 0; k = 0;
 	while ( middle[i] ) {
 		line[k++] = middle[i];
@@ -489,11 +582,85 @@ unsigned char *line;
 		if ( top[i] ) line[k++] = top[i];
 		i++;
 	}
+
+	/* Numbef of Bytes might change */
+	line[k] = 0;
 }
 
+int lefttab[] = {
+	136, 131,        /* Meaning : change 136 to 131, ... */
+	137, 132,        /* Up Level Mai Ek, To, Ti ... */
+	138, 133,
+	139, 134,
+	140, 135,
+	0xED, 0x8F,       /* Circle */
+	0xE8, 0x98,       /* Top Level Mai Ek, To, Ti, ... */
+	0xE9, 0x99,
+	0xEA, 0x9A,
+	0xEB, 0x9B,
+	0xEC, 0x9C,
+	0xD4, 0x94,       /* Sara I, EE, ... */
+	0xD5, 0x95,
+	0xD6, 0x96,
+	0xD7, 0x97,
+	0xD1, 0x92,
+	0xE7, 0x93
+};
+
+int moveleft( int c ) {
+	int i;
+
+	for ( i = 0; i<34; i += 2 ) {
+		if ( lefttab[i] == c )
+			return lefttab[i + 1];
+	}
+	return c;
+}
 
 /*
 * $Log: cttex.c,v $
+* Revision 1.15  1995/10/06  13:09:52  vuthi
+* BUG FIXED : HTML mode worked only on the first line.
+*
+* Revision 1.14  1995/08/07  15:26:36  vuthi
+* HTML mode added
+*
+* Revision 1.13  1995/08/03  06:05:11  vuthi
+* Change "TEST MODE" to "FILTER MODE"
+*
+* Revision 1.12  1995/08/03  05:37:00  vuthi
+* Built-In dictionary (via .h file)
+* Perl script created
+* remove readdictfile()
+* remove -d option
+* dooneline() can be used alone (as a word-sep library).
+*
+* Revision 1.11  1995/08/03  04:47:22  vuthi
+* Fix bug in filter().. add if(SKIPWORD(c)) to reset 'a'
+*
+* Revision 1.10  1995/08/02  11:23:20  vuthi
+* Little bug fixed
+*
+* Revision 1.9  1995/08/02  11:19:21  vuthi
+* Add filter() to prevent word break before unknown words
+* Always break after unknown words
+*
+* Revision 1.8  1995/08/02  09:44:05  vuthi
+* New ADJ() algorithm.. Sara Am problem fixed.
+* moveleft() added.
+*
+* Revision 1.7  1995/07/22  17:43:50  vuthi
+* No breaking char at end of Thai word
+*
+* Revision 1.6  1995/04/25  12:11:28  vuthi
+* Use memcmp instead of strcmp to fix bug on some Japanized machine
+*
+* Revision 1.52  1995/4/24  23:26:00
+* 8-Bit version and use \tb instead of #254
+*
+* Revision 1.5  1994/12/23  08:45:06  vuthi
+* Bug of newline disappear at the end of Thai line
+*
 * Revision 1.4  1994/12/14  10:50:18  vuthi
 * Command Line Option, use "%" to terminal Thai lines
 *

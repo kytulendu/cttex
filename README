@@ -1,150 +1,63 @@
-C-TTeX
+Description:
+============
+	The main part of Cttex is A Thai Word Separator algorithm using
+a dictionary. A wrapper for formatting Thai LaTeX document file is provided
+to demonstrate the use of this word-sep routine. The program can also
+be used as a simple word-sep filter.
+
+Contents:
+=========
+	cttex.c		The word-sep routine & LaTeX wrapper
+	dictsort.c	Sort contents of dictionary file
+	tdict.txt	Dict file
+	dict2c.pl	Perl script to convert tdict.txt -> tdict.h
+
+Usage:
 ======
-	ttex -> tex converting program in C.
+	cttex [cutcode] < infile > outfile
 
-Files in this package
----------------------
-Programs :
-	 cttex.c	- Dictionary-based word separator program (C)
-	 news2ttex	- Convert Yenbut's Thai News into ".ttex" format (PERL)
-	 dottex		- Typical shell (CSH) script to convert .ttex -> .ps
-Fonts :
-	 lobr.gsf	- LopBuRi Font (Type 1)
-	 lobr.tfm	- LopBuRi Font Matrix
-	 pep.gsf	- PeePee Font
-	 pep.tfm	- PeePee Font Matrix
-Data Files :
-	 README		- This File
-	 tdict.txt	- Dictionary File
-	 tfontdesc	- FontDesc file for "dvi2ps" program
-	 thai.sty	- Thai Style file for TeX
-Sample Files :
-	 941213		- Yenbut's Thai News
-	 pentium.ttex	- Pentium News (an article in SaiYai magazine)
-	 testfont.ttex	- Test Font of different sizes
-PS Files :
-	 PostScript files of all sample files are provided in
-	 separated package "cttex-sample.tar.gz". Obtain it in case that
-	 you cannot use this program but want to know what it does.
+	If 'cutcode' is given, cttex will work in Filter mode. The
+value of 'cutcode' specifies the ASCII code of character to be inserted.
+If it's 0, <WBR> will be inserted and cttex will work in HTML mode.
 
+Examples
 
-How to Compile cttex
---------------------
-	You need an ANSI-C compiler, for example "gcc". SUN "cc" program
-doesn't work.
+	- LaTeX mode
 
-	gcc -O2 -o cttex cttex.c
+		cttex < foo.ttex > foo.tex
 
-Description
------------
-	In short, "cttex" reads your "ttex" file (see example :- pentium.ttex)
-and converts it into "tex" format which is understandable by "latex" command.
-In detail, what "cttex" does is
+	- Filter mode
 
-	1. Scanning Thai sentences in your ttex file, and inserting
-	   "WORD BREAK" special character to let TeX know where to break
-	   a Thai sentence. "cttex" does this by using a dictionary based
-	   algorithm. The dictionary file is "tdict.txt".
+		cttex 32 < infile > outfile
 
-	2. Choosing appropriate WanNaYuk for better looking :- Lowering
-	   Mai-Ek if Sara-I/E... is not there.
+	Here, the blank (ascii 32) is inserted at every breakable
+	point.
 
-	3. Encoding Thai characters in "\cXXX" format conforming to
-	   Manop's thai.sty file.
+	- HTML mode
 
-	4. Surrounding Thai sentences with {\thai ......} braces.
+		cttex 0 < infile > outfile
 
-PS: If a number is given at command line, "cttex" will use that character
-    as separating code and print out the result after step 1 without
-    performing step 3 and 4. This is for verifying word-separating feature.
-    For example,
+	Here, <WBR> is inserted at every breakable point.
 
-		cttex 32 < pentium.ttex
+Build:
+======
+	Just type 'make'
 
-    will print out "pentium.ttex" file with "space" separating Thai words.
+Note:
+=====
+	If you only need the word-sep routine, remove everyting
+in main() but the line
 
-By using "cttex" and Manop's ttex package, which is also included in this
-package, the procedure of printing a Thai TeX file is
+	cutcode = CUTCODE;
 
-	1. Create your "ttex" file by any TIS Thai editors.
-	   Don't worry about word separation.
-	   (For example, pentium.ttex)
+This line defines what character to be inserted at word-breakable
+points. The main word-sep routine is dooneline().
 
-	2. Generate "tex" file by running
+Let me know if you find any bugs or have any comment.
 
-		cttex < pentium.ttex > pentium.tex
+Thank you.
 
-	3. Use ordinary latex (jlatex) command to generate "dvi" file
-
-		jlatex pentium.tex
-
-	   The program may complain that thai.sty is not available.
-	   In which case, do the following to add current directory
-	   into TeX search path, then try again.
-
-		setenv TEXFONTS .:/usr/local/lib/tex/inputs
-
-	4. Convert .dvi to .ps file by
-
-		dvi2ps -R 400 -F ./tfontdesc pentium.dvi > pentium.ps
-
-	   The number 400 is the resolution (DPI) of PS printer.
-
-PS: These 4 steps are automatically performed in "dottex" shell script.
-
-NOTE :
-====
-	1. Most of the files here are from Manop's ttex package at
-	   ftp://rumi.cs.titech.ac.jp/pub/thai/
-
-	2. The algorithm for choosing appropriate WanNaYuk was adopted
-  	   from Rattipat's "tops" program available at the same ftp site.
-
-	3. I got the dictionary file "tdict.txt" from Kitinon. No further
-	   information where it emerged from.
-
-	4. 6 Thai typefaces are defined in "thai.sty" file,
-
-		\tlo		Loburi ordinary size
-		\ltlo		Loburi large size
-		\Ltlo		Loburi larger size
-
-		\tpe		PeePee ordinary size
-		\ltpe		PeePee large size
-		\Ltpe		PeePee larger size
-
-	   see "thai.sty", and you will know how to define more.
-	   Use the \tfont command to select a typeface, for example
-
-		\tfont{\tpe}	-> Select \tpe typeface
-
-	5. The "ordinary size" is defined at 15pt (see thai.sty) which
-	   matches (look good, I think) with 12pt of TeX roman font. So,
-	   don't forget to add "12pt" in your \documentstyle command.
-
-		If you prefer to use 10pt roman font, modify thai.sty
-	   somehow to reduce size of Thai characters.
-
-Example
--------
-	There are 3 examples, in this package
-
-		1. pentium.ttex
-		2. testfont.ttex
-		3. 941213
-
-	- Run "dottex pentium" and you will obtain "pentium.ps" file.
-	- Do the same for "testfont.ttex".  However, this file requires
-	  "jarticle" style file. If you get an error message, try to install
-	  it first.
-	- 941213 is the typical News file from Thai News Agency obtainable
-	  by subscribing to Yenbut's mailing list. First, you have to convert
-	  it into "ttex" format. This can be done by using "news2ttex" perl
-	  script.
-
-		news2ttex 941213 > 941213.ttex
-
-	  Then make PS file by
-
-		dottex 941213.ttex
-
+-------------------------------------------------------------------------
+Hui :>
+vuthi@ctrl.titech.ac.jp
+-------------------------------------------------------------------------
