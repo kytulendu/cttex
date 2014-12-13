@@ -1,25 +1,24 @@
-PACKAGE = cttex.c Makefile dictsort.c dict2c.pl tdict.txt README
+all: cttex dict2state
 
-all: cttex dictsort
+cttex: cttex.c map.o
+	gcc -O2 -o cttex cttex.c map.o
 
-cttex: cttex.c tdict.h
-	gcc -o cttex cttex.c
+map.o: map.c
+	gcc -O2 -c map.c
 
 dictsort: dictsort.c
 	gcc -O2 -o dictsort dictsort.c
 
-tdict.h: tdict.sorted
-	dict2c.pl tdict.sorted > tdict.h
+dict2state: dict2state.c
+	gcc -O2 -o dict2state dict2state.c
 
-tdict.sorted: tdict.txt dictsort
-	dictsort
+map.c: tdict.txt dict2state
+	dict2state
 
 tdict.txt: tdict.org tdict.hui
 	cat tdict.org tdict.hui > tdict.txt
 
-pack: $(PACKAGE)
-	tar zcvf cttex.tar.gz $(PACKAGE)
-
 clean:
-	rm cttex dictsort tdict.h *~
+	rm cttex dictsort dict2state tdict.h map.c map.h *~ *.o \
+	tdict.sorted tdict.txt
 

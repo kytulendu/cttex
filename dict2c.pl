@@ -15,6 +15,8 @@ while(<>) {
   chop;
   next if /^\s*$/;
   $i = length($_);
+  $ex[$i]=1;
+  $maxl = $i if $i > $maxl;
   print ",\n" if $c;
   printf "\"\\x%02X%s\"", $i, $_;
   $c++;
@@ -23,6 +25,5 @@ while(<>) {
 print <<ENDEND;
 };
 int numword = $c;
-
+int maxwordlength = $maxl;
 ENDEND
-
