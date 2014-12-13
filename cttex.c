@@ -3,7 +3,7 @@
 /* vuthi@ctrl.titech.ac.jp                    */
 /* Change Log is available at the end of file */
 
-/* $Header: /home/vuthi/ttex/cttex/RCS/cttex.c,v 1.15 1995/10/06 13:09:52 vuthi Exp vuthi $
+/* $Header: /home/vuthi/ttex/cttex/RCS/cttex.c,v 1.16 1996/09/01 13:34:49 vuthi Exp vuthi $
 */
 
 /* Maximum number of words in the dictionary */
@@ -34,7 +34,7 @@
 		((x)<0xD0?0:(levtable[(x)-0xD0]!=0))
 
 /* Never change this value. If you do, make sure it's below 255. */
-#define CUTCODE 254
+#define	CUTCODE 254
 
 /* Set this one will reduce output size with new TeX */
 #define HIGHBIT 1
@@ -80,7 +80,7 @@ char *argv[];
 
 	cutcode = CUTCODE;
 
-	fprintf( stderr, "C-TTeX $Revision: 1.15 $\n" );
+	fprintf( stderr, "C-TTeX $Revision: 1.16 $\n" );
 	fprintf( stderr, "Usage : cttex [cutcode] < infile > outfile\n" );
 	fprintf( stderr, "Usage : cutcode=0 forces operation in HTML mode.\n" );
 	fprintf( stderr, "Built-in dictionary size: %d words\n", numword );
@@ -105,11 +105,11 @@ char *argv[];
 	while ( !feof( fp ) ) {
 		retval = fgets( str, MAXLINELENGTH - 1, fp );
 		if ( !feof( fp ) ) {
-			if ( testmode ) {
-				if ( testmode == 1 ) {
+			if ( testmode ) {               /* Non-TeX mode */
+				if ( testmode == 1 ) {          /* Break with given code */
 					dooneline( str, out );
 					printf( "%s", out );
-				} else {
+				} else {                     /* Break with <WBR> tag */
 					dooneline( str, out );
 					j = 0;
 					while ( c = out[j] ) {
@@ -119,12 +119,32 @@ char *argv[];
 							putchar( 'B' );
 							putchar( 'R' );
 							putchar( '>' );
-						} else
+						} else {
+							if ( HIGHWORD( c ) && !thaimode ) {
+								putchar( '<' );
+								putchar( 'N' );
+								putchar( 'O' );
+								putchar( 'B' );
+								putchar( 'R' );
+								putchar( '>' );
+								thaimode = 1;
+							}
+							if ( !HIGHWORD( c ) && thaimode ) {
+								putchar( '<' );
+								putchar( '/' );
+								putchar( 'N' );
+								putchar( 'O' );
+								putchar( 'B' );
+								putchar( 'R' );
+								putchar( '>' );
+								thaimode = 0;
+							}
 							putchar( c );
+						}
 						j++;
 					}
 				}
-			} else {
+			} else {                   /* TeX Mode */
 				dooneline( str, out );
 				adj( out );		/* Choose appropriate WANNAYUK */
 				j = 0;
@@ -619,6 +639,12 @@ int moveleft( int c ) {
 
 /*
 * $Log: cttex.c,v $
+* Revision 1.16  1996/09/01 13:34:49  vuthi
+* In HTML mode :
+*   Surround Thai Text with <NOBR> tags, to allow use of <WBR>
+*   in Microsoft Internet Explorer 3.0
+*   Without <NOBR>, <WBR> has no meaning in IE 3.0
+*
 * Revision 1.15  1995/10/06  13:09:52  vuthi
 * BUG FIXED : HTML mode worked only on the first line.
 *

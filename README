@@ -16,9 +16,8 @@ Usage:
 ======
 	cttex [cutcode] < infile > outfile
 
-	If 'cutcode' is given, cttex will work in Filter mode. The
-value of 'cutcode' specifies the ASCII code of character to be inserted.
-If it's 0, <WBR> will be inserted and cttex will work in HTML mode.
+	'cutcode' specifies the ASCII code of character to be inserted
+in filter mode.
 
 Examples
 
@@ -32,12 +31,6 @@ Examples
 
 	Here, the blank (ascii 32) is inserted at every breakable
 	point.
-
-	- HTML mode
-
-		cttex 0 < infile > outfile
-
-	Here, <WBR> is inserted at every breakable point.
 
 Build:
 ======
