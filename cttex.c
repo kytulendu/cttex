@@ -4,14 +4,8 @@
 /* Change Log is available at the end of file */
 /* Use "ci -l cttex.c" to add comments        */
 
-/* $Header: /home/vuthi/ttex/cttex/RCS/cttex.c,v 1.17 1997/01/04 15:15:08 vuthi Exp vuthi $
+/* $Header: /export/home/vuthi/cttex119/RCS/cttex.c,v 1.19 1999/03/16 12:04:05 vuthi Exp vuthi $
 */
-
-/* Maximum number of words in the dictionary */
-#define MAXWORD 15000
-
-/* Maximum length of one word in the dict */
-#define MAXWORDLENGTH 40
 
 /* Maximum length of input line */
 #define MAXLINELENGTH 1000
@@ -36,10 +30,10 @@
 
 /* Never change this value. If you do, make sure it's below 255. */
 #define CUTCODE 254
+#define ENDCUTLIST 9999
 
 /* Set this one will reduce output size with new TeX */
-#define HIGHBIT 0
-
+#define HIGHBIT 1 
 
 #include <stdio.h>
 #include <string.h>
@@ -49,7 +43,9 @@
 /* Load Dictionary : wordptr & numword */
 #include "tdict.h"
 
-int dooneline( unsigned char *, unsigned char * );
+int dooneline2( unsigned char *, unsigned char * );
+int dooneline2sub( unsigned char *in, int *cutlist, int cutpoint, int );
+int docut( unsigned char *in, unsigned char *out, int * );
 void savestatus( int*, int*, int*, int*, int*, int*, unsigned char *, int );
 void adj( unsigned char * );
 void fixline( unsigned char * );
@@ -64,11 +60,13 @@ int moveleft( int );
 int levtable[] = {
 	0, 2, 0, 0, 2, 2, 2, 2, 1, 1, 1, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 2, 3, 3, 3, 3, 3, 2, 3, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0
-};
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0 };
 
 int cutcode, r_cutcode;
-
+int highlight, debugmode, reportmode;
+unsigned char *mystr;
+int minerr, minword;
+int *bestcutlist;
 
 /* main() : Wrapper for Thai LaTeX */
 int main( argc, argv )
@@ -83,26 +81,60 @@ char *argv[];
 	int ret;
 
 	cutcode = CUTCODE;
+	highlight = 0;         /* HightLight Mode */
+	debugmode = 0;
+	reportmode = 0;
 
-	fprintf( stderr, "C-TTeX $Revision: 1.17 $\n" );
-	fprintf( stderr, "Usage : cttex [cutcode] < infile > outfile\n" );
-	fprintf( stderr, "Usage : cutcode=0 forces operation in HTML mode.\n" );
+	fprintf( stderr, "C-TTeX $Revision: 1.19 $\n" );
+	fprintf( stderr, "cttex -h for help usage.\n" );
 	fprintf( stderr, "Built-in dictionary size: %d words\n", numword );
 
 	for ( i = 1; i<argc; i++ ) {
 		if ( ( argv[i][0] >= '0' ) && ( argv[i][0] <= '9' ) ) {
 			sscanf( argv[i], "%d", &cutcode );
-			if ( cutcode ) {		/* Test with given code */
+			if ( ( cutcode >= 1 ) && ( cutcode <= 253 ) ) {	/* Test with given code */
 				testmode = 1;
 				fprintf( stderr, "Filter mode, cut code = %d\n", cutcode );
 				r_cutcode = cutcode;
 
 				/* Always use 254 to avoid problem with cutcode+1 */
 				cutcode = CUTCODE;
-			} else {			/* HTML mode : use <WBR> code */
+			} else {
+				fprintf( stderr, "Invalid cutcode\n" );
+				exit( 1 );
+			}
+		} else if ( argv[i][0] == '-' ) {
+			switch ( argv[i][1] ) {
+			case 'h': /* Help */
+				printf( "Usage : cttex [options] < infile > outfile\n" );
+				printf( "Be default, cttex operates in LaTeX mode.\n" );
+				printf( "CTTEX Options are\n" );
+				printf( "  1-253 : Run in filter mode, words are separated\n" );
+				printf( "          with the given code.\n" );
+				printf( "  -h    : Display this message.\n" );
+				printf( "  -w    : Separate words by <WBR>\n" );
+				printf( "  -u    : Highlight unknown words with <II>, <OO>\n" );
+				printf( "  -r    : Report unknown words to STDERR\n" );
+				printf( "  -d    : Send debug message to STDOUT\n" );
+				exit( 0 );
+				break;
+			case 'w':
 				cutcode = CUTCODE;
 				testmode = 2;
 				fprintf( stderr, "HTML mode\n" );
+				break;
+			case 'u':
+				highlight = 1;
+				fprintf( stderr, "HighLight Mode\n" );
+				break;
+			case 'd':
+				debugmode = 1;
+				fprintf( stderr, "Debug ON\n" );
+				break;
+			case 'r':
+				reportmode = 1;
+				fprintf( stderr, "Report ON\n" );
+				break;
 			}
 		}
 	}
@@ -112,14 +144,16 @@ char *argv[];
 	thaimode = cr = 0;
 	while ( !feof( fp ) ) {
 		retval = fgets( str, MAXLINELENGTH - 1, fp );
-		fixline( str );
 		if ( !feof( fp ) ) {
+			fixline( str );
 			if ( testmode ) {               /* Non-TeX mode */
 				if ( testmode == 1 ) {          /* Break with given code */
-					if ( dooneline( str, out ) )
-						fprintf( stderr,
-						"Above unknown word(s) are in line : %d\n%d:%s---\n",
-						i + 1, i + 1, out );
+					if ( dooneline2( str, out ) && ( !highlight ) ) {
+						if ( reportmode )
+							fprintf( stderr,
+							"Above unknown word(s) are in line : %d\n%d:%s---\n",
+							i + 1, i + 1, out );
+					}
 					/* Change cutcode to r_cutcode */
 					j = strlen( out );
 					while ( j >= 0 ) {
@@ -129,7 +163,7 @@ char *argv[];
 					}
 					printf( "%s", out );
 				} else {                     /* Break with <WBR> tag */
-					dooneline( str, out );
+					dooneline2( str, out );
 					j = 0;
 					while ( c = out[j] ) {
 						if ( c == cutcode ) {
@@ -140,22 +174,22 @@ char *argv[];
 							putchar( '>' );
 						} else {
 							if ( HIGHWORD( c ) && !thaimode ) {
-								putchar( '<' );
-								putchar( 'N' );
-								putchar( 'O' );
-								putchar( 'B' );
-								putchar( 'R' );
-								putchar( '>' );
+								/* putchar('<');
+								putchar('N');
+								putchar('O');
+								putchar('B');
+								putchar('R');
+								putchar('>');*/
 								thaimode = 1;
 							}
 							if ( !HIGHWORD( c ) && thaimode ) {
-								putchar( '<' );
-								putchar( '/' );
-								putchar( 'N' );
-								putchar( 'O' );
-								putchar( 'B' );
-								putchar( 'R' );
-								putchar( '>' );
+								/* putchar('<');
+								putchar('/');
+								putchar('N');
+								putchar('O');
+								putchar('B');
+								putchar('R');
+								putchar('>');*/
 								thaimode = 0;
 							}
 							putchar( c );
@@ -164,7 +198,7 @@ char *argv[];
 					}
 				}
 			} else {                   /* TeX Mode */
-				dooneline( str, out );
+				dooneline2( str, out );
 				adj( out );		/* Choose appropriate WANNAYUK */
 				j = 0;
 				while ( ( c = ( int ) out[j] ) != 0 ) {
@@ -243,138 +277,6 @@ char *argv[];
 
 	return 0;
 }
-
-/* Word sep goes here */
-int dooneline( unsigned char *in, unsigned char *out ) {
-	int i, j, k, l, old_i;
-	int wlist[MW], poslist[MW], jlist[MW], windex;
-	int pos, fence, backmode;
-	int prev_error = 0;
-
-	i = old_i = j = 0;
-	windex = 0;
-	fence = 0;
-	backmode = 0;
-	prev_error = 0;
-
-	while ( in[i] ) {
-
-		/* old_i is the value of i before looking back mode */
-		/* i>old_i means looking back was successful, cancel it */
-		if ( i>old_i )
-			backmode = 0;
-
-		if ( SKIPWORD( in[i] ) ) {	        /* Chars to be skipped ? */
-			if ( prev_error ) {
-				/* Mark words not in dict */
-				out[j++] = cutcode + 1;
-				prev_error = 0;
-			}
-			backmode = fence = windex = 0;        /* Begin new word list */
-			while ( SKIPWORD( in[i] ) && in[i] ) {	/* Skip English char */
-				out[j++] = in[i++];
-			}
-		}
-		if ( in[i] )			        /* Still not EOL ? */
-			do {
-				if ( ( k = findword( in + i, &pos ) ) != 0 ) { /* Found in dict */
-					if ( prev_error ) {
-						/* Mark words not in dict */
-						out[j++] = cutcode + 1;
-						prev_error = 0;
-					}
-					wlist[windex] = i;
-					poslist[windex] = pos;
-					jlist[windex] = j;
-					windex++;
-
-					/* For speed, limit the number of words to LOOK back */
-					/* by creating a fence */
-					/* Fence may only INCREASE */
-					if ( windex - BACKDEPTH > fence ) {
-						fence = windex - BACKDEPTH;
-					}
-
-					for ( l = 0; l<k; l++ )	/* Copy word */
-						out[j++] = in[i++];
-
-					/* Mai Ya Mok & Pai Yan Noi */
-					/*	I was using this code before adding these two characters
-					into the dict. Now they are in the dict and I no longer need
-					these two lines.
-					*/
-					while ( ( in[i] == 0xE6 ) || ( in[i] == 0xCF ) )
-						out[j++] = in[i++];
-
-					if ( !SKIPWORD( in[i] ) )	/* Make sure it's not the last
-												Thai word */
-												out[j++] = cutcode;	/* Insert word sep symbol */
-				} else {			/* Not in Dict */
-
-					/* Shortening the prev wordS may help */
-					/* Try to Look Back */
-					while ( ( windex > fence ) && !k ) {
-						/* Save status before looking back */
-						if ( !backmode ) {
-							backmode = 1;
-							savestatus( &windex, wlist, poslist, jlist, &i, &j, out, 1 );
-							old_i = i;
-						}
-						pos = poslist[windex - 1] - 1; /* Skip back one word */
-						while ( ( pos >= 0 ) &&
-							( ( l = countmatch( wordptr[pos] + 1, in + wlist[windex - 1] ) )>0 ) ) {
-							if ( ( l == wordptr[pos][0] ) &&
-								!NOTMIDDLE( in[wlist[windex - 1] + l] ) ) {
-								k = 1; break;
-							}
-							pos--;
-						}
-						/* A shorter version of prev word found */
-						if ( k ) {
-							out[j = jlist[windex - 1] + l] = cutcode;
-							poslist[windex - 1] = pos;
-							j++;
-							i = wlist[windex - 1] + l;
-						} else {
-							if ( backmode && ( windex == fence + 1 ) ) {
-								/* Search-Back method can't help, restore prev status */
-								savestatus( &windex, wlist, poslist, jlist, &i, &j, out, 0 );
-								break;
-							}
-							windex--;
-						}
-					}
-					/* Sure that word is not in dictionary */
-					if ( k == 0 ) {
-						prev_error = 1;	/* Begin unknown word area */
-						out[j++] = in[i++];	/* Copy it */
-						backmode = fence = windex = 0; /* Clear Word List */
-					}
-				}
-			} while ( ( k == 0 ) && ( !SKIPWORD( in[i] ) ) );
-	}
-	out[j] = 0;
-
-	/* Sth to do with words not in dict */
-	/* (Remove 'cutcode+1') */
-	return filter( out );
-}
-
-/* Sequential verion */
-/*
-int findword(unsigned char *in)
-{
-int i;
-
-for(i=numword-1;i>=0;i--) {
-if(mystrncmp(in,wordptr[i]+1,wordptr[i][0])==0) {
-printf("Found : %s %d\n", wordptr[i]+1,wordptr[i][0]);
-return wordptr[i][0];
-}
-}
-return 0;
-}
-*/
 
 /* Calling : Index to a string
 Return  : Length of recognized word, and position of that word in
@@ -551,21 +453,59 @@ int filter( unsigned char *line ) {
 		i++;
 	}
 
-	if ( found ) {
-		pr = i = j = 0;
-		while ( c = str[i++] ) {
-			if ( c != cutcode + 1 )
-				line[j++] = c;
-			if ( c == cutcode + 1 )
-				pr = 1;
-			else if ( pr && ( c == cutcode || SKIPWORD( c ) ) ) {
-				pr = 0;
-				fputc( '\n', stderr );
-			} else if ( pr )
-				fputc( c, stderr );
-			/* fprintf(stderr,"%c(%d)",c,c); */
+	if ( found || highlight ) {
+		if ( highlight ) {
+			i = j = 0;
+			pr = 0;
+			while ( c = str[i++] ) {
+				if ( ( c == cutcode + 1 ) && ( !pr ) ) {
+					line[j++] = '<';
+					line[j++] = 'I';
+					line[j++] = 'I';
+					line[j++] = '>';
+					pr = 1;
+				} else if ( c == cutcode && pr ) {
+					line[j++] = '<';
+					line[j++] = 'O';
+					line[j++] = 'O';
+					line[j++] = '>';
+					pr = 0;
+				} else if ( SKIPWORD( c ) && pr ) {
+					line[j++] = '<';
+					line[j++] = 'O';
+					line[j++] = 'O';
+					line[j++] = '>';
+					pr = 0;
+					line[j++] = c;
+				} else if ( ( c != cutcode + 1 ) && ( c != cutcode ) )
+					line[j++] = c;
+			}
+			if ( pr ) {
+				line[j++] = '<';
+				line[j++] = 'O';
+				line[j++] = 'O';
+				line[j++] = '>';
+			}
+			line[j] = 0;
+		} else {
+			pr = i = j = 0;
+			while ( c = str[i++] ) {
+				if ( c != cutcode + 1 )
+					line[j++] = c;
+				if ( c == cutcode + 1 )
+					pr = 1;
+				else if ( pr && ( c == cutcode || SKIPWORD( c ) ) ) {
+					pr = 0;
+					if ( reportmode )
+						fputc( '\n', stderr );
+				} else if ( pr ) {
+					if ( reportmode )
+						fputc( c, stderr );
+					/* fprintf(stderr,"%c(%d)",c,c); */
+				}
+			}
+			line[j] = 0;
 		}
-		line[j] = 0;
 	}
 	return found;
 }
@@ -588,9 +528,8 @@ unsigned char *line;
 				if ( low ) line[j++] = low;
 				if ( up )  line[j++] = up;
 				if ( top ) line[j++] = top;
-
-				top = up = middle = low = 0;
 			}
+			top = up = middle = low = 0;
 			middle = c; break;
 		case 1:
 			low = c; break;
@@ -600,7 +539,34 @@ unsigned char *line;
 			top = c; break;
 		}
 	}
+	if ( middle ) {
+		line[j++] = middle;
+		if ( low ) line[j++] = low;
+		if ( up )  line[j++] = up;
+		if ( top ) line[j++] = top;
+	}
 	line[j] = 0;
+}
+
+int docut( unsigned char *in, unsigned char *out, int *cutlist ) {
+	int i, j, k, l;
+
+	i = j = k = 0;
+	while ( in[i] ) {
+		l = cutlist[k];
+		if ( l<-100 ) {
+			l = -l - 100;
+		}
+		if ( l<0 ) {
+			l = -l;
+		}
+		while ( l-- )
+			out[j++] = in[i++];
+		out[j++] = cutcode + ( ( cutlist[k] < 0 ) ? 1 : 0 );
+		k++;
+	}
+	out[j] = 0;
+	return j;
 }
 
 /* Old one by Fong (Completely Removed)
@@ -694,25 +660,23 @@ unsigned char *line;
 	line[k] = 0;
 }
 
-int lefttab[] = {
-	136, 131,        /* Meaning : change 136 to 131, ... */
-	137, 132,        /* Up Level Mai Ek, To, Ti ... */
-	138, 133,
-	139, 134,
-	140, 135,
-	0xED, 0x8F,       /* Circle */
-	0xE8, 0x98,       /* Top Level Mai Ek, To, Ti, ... */
-	0xE9, 0x99,
-	0xEA, 0x9A,
-	0xEB, 0x9B,
-	0xEC, 0x9C,
-	0xD4, 0x94,       /* Sara I, EE, ... */
-	0xD5, 0x95,
-	0xD6, 0x96,
-	0xD7, 0x97,
-	0xD1, 0x92,
-	0xE7, 0x93
-};
+int lefttab[] = { 136, 131,        /* Meaning : change 136 to 131, ... */
+137, 132,        /* Up Level Mai Ek, To, Ti ... */
+138, 133,
+139, 134,
+140, 135,
+0xED, 0x8F,       /* Circle */
+0xE8, 0x98,       /* Top Level Mai Ek, To, Ti, ... */
+0xE9, 0x99,
+0xEA, 0x9A,
+0xEB, 0x9B,
+0xEC, 0x9C,
+0xD4, 0x94,       /* Sara I, EE, ... */
+0xD5, 0x95,
+0xD6, 0x96,
+0xD7, 0x97,
+0xD1, 0x92,
+0xE7, 0x93 };
 
 int moveleft( int c ) {
 	int i;
@@ -724,8 +688,172 @@ int moveleft( int c ) {
 	return c;
 }
 
+/* New Recursive Version */
+
+int dooneline2( unsigned char *in, unsigned char *out ) {
+	int l, c, i, j, jt, freetemp;
+	int *cutlist;
+	unsigned char *temp;
+	unsigned char stemp[MAXLINELENGTH];
+
+	i = j = freetemp = 0;
+	temp = stemp;
+	l = strlen( in );
+	/* Allocate from Heap if the line is too long */
+	if ( l>MAXLINELENGTH ) {
+		temp = malloc( l + 1 );
+		freetemp = 1;
+	}
+
+	cutlist = malloc( sizeof( int )*l );
+	bestcutlist = malloc( sizeof( int )*l );
+
+	jt = 0;
+	while ( in[i] ) {
+		if ( SKIPWORD( in[i] ) ) {
+			if ( jt ) {
+				temp[jt] = 0;
+				if ( debugmode )
+					printf( "->%s\n", temp );
+				mystr = temp;
+				minerr = minword = 9999;
+				c = dooneline2sub( temp, cutlist, 0, 0 );
+				j += docut( temp, out + j, bestcutlist );
+				jt = 0;
+			}
+			out[j++] = in[i++];
+		} else {
+			temp[jt++] = in[i++];
+		}
+	}
+	if ( jt ) {
+		temp[jt] = 0;
+		if ( debugmode )
+			printf( "->%s\n", temp );
+		mystr = temp;
+		minerr = minword = 9999;
+		c = dooneline2sub( temp, cutlist, 0, 0 );
+		j += docut( temp, out + j, bestcutlist );
+	}
+	out[j] = 0;
+	free( cutlist );
+	free( bestcutlist );
+	if ( freetemp )
+		free( temp );
+
+	return filter( out );
+}
+
+int dooneline2sub( unsigned char *in, int *cutlist, int cutpoint, int curerr ) {
+	int i, j, k;
+	int pos;
+	int l, matchsize, count;
+
+	i = j = 0;
+	if ( in[0] ) {
+		if ( ( k = findword( in, &pos ) ) != 0 ) {        /* Found in dict */
+			cutlist[cutpoint] = wordptr[pos][0];  /* Record Match Length */
+			dooneline2sub( in + wordptr[pos][0], cutlist, cutpoint + 1, curerr );
+			matchsize = wordptr[pos][0];
+
+			/* See if there are shorter matches */
+			pos--;
+			k = 0;
+			while ( ( pos >= 0 ) &&
+				( ( l = countmatch( wordptr[pos] + 1, in ) )>0 ) ) {
+				if ( ( l == wordptr[pos][0] ) &&
+					!NOTMIDDLE( in[l] ) ) {
+					k = 1;
+				}
+				if ( k ) {	/* Yes, there are */
+					cutlist[cutpoint] = l;  /* Record Match Length */
+					matchsize = l;
+					dooneline2sub( in + l, cutlist, cutpoint + 1, curerr );
+					k = 0;
+				}
+				pos--;
+			}
+			/* Ignore the first match when
+			- This is the first match or
+			//// - The previous match failed
+			*/
+			/* if(cutpoint==0) {   || cutlist[cutpoint-1]<0) { */
+			if ( ( cutpoint == 0 ) ||
+				( cutlist[cutpoint - 1]>0 ) ||
+				( cutlist[cutpoint - 1]<-100 ) )
+				if ( curerr < minerr ) {
+					i = 1;
+					while ( i<matchsize ) {
+						if ( NOTMIDDLE( in[i] ) )
+							i++;
+						else {
+							cutlist[cutpoint] = -i;
+							dooneline2sub( in + i, cutlist, cutpoint + 1, curerr + 1 );
+							i++;
+						}
+					}
+				}
+		} else { /* Not in dict */
+			if ( curerr < minerr ) {
+				i = 1;
+				while ( in[i] && NOTMIDDLE( in[i] ) )
+					i++;
+				cutlist[cutpoint] = -100 - i;  /* Negative indicates unknown word */
+				dooneline2sub( in + i, cutlist, cutpoint + 1, curerr + 1 );
+			}
+		}
+	} else { /* Got a NULL string */
+		k = 0;
+		if ( curerr<minerr )
+			minword = 9999;
+		minerr = curerr;
+		count = cutpoint;
+		if ( debugmode )
+			putchar( '=' );
+		for ( i = 0; i<cutpoint; i++ ) {
+			l = cutlist[i];
+			if ( l<-100 ) {
+				l = -l - 100;
+				if ( debugmode )
+					putchar( '*' );
+				count--;
+			}
+			if ( l<0 ) {
+				l = -l;
+				if ( debugmode )
+					putchar( '#' );
+				count--;
+			}
+			if ( debugmode ) {
+				for ( j = 0; j<l; j++ )
+					putchar( mystr[k++] );
+				putchar( ' ' );
+			}
+		}
+		if ( count <= minword ) {
+			minword = count;
+			for ( i = 0; i<cutpoint; i++ )
+				bestcutlist[i] = cutlist[i];
+			bestcutlist[i] = ENDCUTLIST;
+		}
+		if ( debugmode )
+			printf( "Err(%d) Word(%d)\n", minerr, count );
+	}
+	return cutpoint;
+}
+
 /*
 * $Log: cttex.c,v $
+* Revision 1.19  1999/03/16 12:04:05  vuthi
+* >> - Add "fixline()" to correct the typos
+* >> - New "dooneline2()" recursive algorithm capable of finding
+* >>   all possible cut patterns
+* >> - Command line options
+*
+* Revision 1.18  1997/12/09 19:17:34  vuthi
+* Add highlight mode (cutcode = 1)
+* highlight mode = to be used with Thai-L spell check
+*
 * Revision 1.17  1997/01/04 15:15:08  vuthi
 * - Always uses cutcode = 254 in the real word-sep routine
 *   Given cutcode is applied after that.
@@ -789,3 +917,7 @@ int moveleft( int c ) {
 *
 */
 
+
+/* Limit # of Error
+No double #
+*/
