@@ -1,11 +1,12 @@
 /* Thai word-separator by dictionary */
 /* By Vuthichai A.                   */
-
-#define DICTFILE "tdict.txt"
-#define MAXWORD 70000
-#define MAXWORDLENGTH 500
-#define MAXLINELENGTH 500
-#define MAXSTATE 500000
+/* Win32 stack overflow fixed by NuuNeoi, bpasu  */
+/* neon@nuuneoi.com, bpasu@intania85.org         */
+#define                 DICTFILE               "tdict.txt"
+#define                 MAXWORD                 70000
+#define                 MAXWORDLENGTH           500
+#define                 MAXLINELENGTH           500
+#define                 MAXSTATE                500000
 
 #include <stdio.h>
 #include <string.h>
@@ -14,8 +15,7 @@
 int levtable[] = {
 	0, 2, 0, 0, 2, 2, 2, 2, 1, 1, 1, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 2, 3, 3, 3, 3, 3, 2, 3, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0
-};
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0 };
 
 int map[MAXSTATE][96];
 int state[MAXSTATE];
@@ -68,6 +68,10 @@ main( ) {
 	/* check_headchar(); */
 
 	rnumword = nn;
+
+	printf( "maxstate = %d\n", maxstate );
+	printf( "rnumword = %d\n", rnumword );
+
 	prmap( );
 	return 0;
 }
@@ -216,9 +220,9 @@ void add2map( unsigned char *str, int len ) {
 void prmap( ) {
 	FILE *FP;
 	int i, j, c;
-	int state_min[MAXSTATE];
-	int state_max[MAXSTATE];
-	int state_offset[MAXSTATE];
+	int* state_min = ( int* ) malloc( MAXSTATE*sizeof( int ) );
+	int* state_max = ( int* ) malloc( MAXSTATE*sizeof( int ) );
+	int* state_offset = ( int* ) malloc( MAXSTATE*sizeof( int ) );
 	int offset, min, max;
 
 	c = maxcol - mincol + 1;
@@ -294,4 +298,7 @@ void prmap( ) {
 	fprintf( FP, "extern int state_offset[%d];\n", maxstate );
 	fclose( FP );
 
+	free( state_min );
+	free( state_max );
+	free( state_offset );
 }

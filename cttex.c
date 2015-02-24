@@ -1,6 +1,8 @@
 /* Thai word-separator by dictionary          */
 /* By Vuthichai A.                            */
 /* vuthi@ctrl.titech.ac.jp                    */
+/* Win32 stack overflow fixed by NuuNeoi, bpasu  */
+/* neon@nuuneoi.com, bpasu@intania85.org         */
 /* Change Log is available at the end of file */
 /* Use "ci -l cttex.c" to add comments        */
 
@@ -42,10 +44,12 @@ int minerr, minword;
 int *bestcutlist;
 int bStopNow;
 int iLineNumber;
-int ListStack[LISTSTACKDEPTH][CUTLISTSIZE];
+int **ListStack;
 int iListStackPointer;
 int piDifList[2 * DIFLISTSIZE];
 int iDifPtr;
+
+char *bmarker;
 
 /* main() : Wrapper for Thai LaTeX */
 int main( argc, argv )
@@ -55,9 +59,12 @@ char *argv[];
 	FILE *fp, *fopen( );
 	unsigned char str[MAXLINELENGTH], out[MAXLINELENGTH];
 	unsigned char *retval;
-	int i, j, thaimode, c, cr;
+	int i, j, k, thaimode, c, cr;
 	int testmode = 0;
 	int ret;
+
+	ListStack = ( int** ) malloc( sizeof( int ) * LISTSTACKDEPTH );
+	ListStack[0] = ( int* ) malloc( sizeof( int ) * LISTSTACKDEPTH * CUTLISTSIZE );
 
 	cutcode = CUTCODE;
 	bShowAll = 0;
@@ -66,7 +73,7 @@ char *argv[];
 	reportmode = 0;
 	firstmode = 0;
 
-	fprintf( stderr, "C-TTeX Revision: 1.30\n" );
+	fprintf( stderr, "C-TTeX Revision: 1.30 win32-fixed\n" );
 	fprintf( stderr, "cttex -h for help usage.\n" );
 	fprintf( stderr, "Built-in dictionary size: %d words\n", numword );
 
@@ -91,15 +98,17 @@ char *argv[];
 				printf( "Be default, cttex operates in LaTeX mode.\n" );
 				printf( "CTTEX Options are\n" );
 				printf( " 1-253 : Run in filter mode, words are separated\n" );
-				printf( "         with the given code.\n" );
+				printf( "         with the given code\n" );
 				printf( " -a    : Show all possible separation patterns\n" );
 				printf( " -i    : Index Mode. Similar to -a with minimal output\n" );
 				printf( " -m    : Show only minimal number of words for -a and -i\n" );
-				printf( " -w    : Separate words by <WBR>\n" );
+				printf( " -w    : Separate words by <WBR> (for HTML)\n" );
+				printf( " -W    : Separate words by \\wbr (for Babel Thai LaTeX)\n" );
+				printf( " -b x  : Separate words by a given \"x\" boundary marker\n" );
 				printf( " -r    : Report unknown words to STDERR\n" );
 				printf( " -d    : Show debug messages\n" );
 				printf( " -f    : Stop at first pattern with no unknown (a bit faster)\n" );
-				printf( " -h    : Display this message.\n" );
+				printf( " -h    : Display this message\n" );
 				exit( 0 );
 				break;
 			case 'w':
@@ -107,13 +116,32 @@ char *argv[];
 				testmode = 2;
 				fprintf( stderr, "HTML mode\n" );
 				break;
+			case 'W':
+				cutcode = CUTCODE;
+				testmode = 3;
+				fprintf( stderr, "Babel Thai LaTeX mode\n" );
+				break;
+			case 'b':
+				/* same as Filter mode, only that it allow a string for "cut code" */
+				cutcode = CUTCODE;
+				testmode = 4;
+				i++;
+				if ( i<argc ) {
+					bmarker = ( char* ) malloc( sizeof( char ) * ( strlen( argv[i] ) + 1 ) );
+					strcpy( bmarker, argv[i] );
+					fprintf( stderr, "Custom boundary marker mode, marker = %s\n", bmarker );
+				} else {
+					fprintf( stderr, "-b must follows by a boundary marker\n" );
+					exit( 1 );
+				}
+				break;
 			case 'a':
 				bShowAll = 1;
-				fprintf( stderr, "ShowAll Mode\n" );
+				fprintf( stderr, "ShowAll mode\n" );
 				break;
 			case 'i':
 				bIndexMode = 1;
-				fprintf( stderr, "IndexMode Mode\n" );
+				fprintf( stderr, "IndexMode mode\n" );
 				break;
 			case 'm':
 				if ( bShowAll || bIndexMode ) {
@@ -156,7 +184,7 @@ char *argv[];
 			iLineNumber++;
 			fixline( str );
 			if ( testmode ) {               /* Non-TeX mode */
-				if ( testmode == 1 ) {          /* Break with given code */
+				if ( testmode == 1 ) {          /* Break with given code (single character) */
 					dooneline2( str, out );
 					/* Change cutcode to r_cutcode */
 					j = strlen( ( char * ) out );
@@ -166,16 +194,34 @@ char *argv[];
 						j--;
 					}
 					printf( "%s", out );
-				} else {                     /* Break with <WBR> tag */
+				} else {                     /* Break with boundary marker */
 					dooneline2( str, out );
 					j = 0;
 					while ( c = out[j] ) {
 						if ( c == cutcode ) {
-							putchar( '<' );
-							putchar( 'W' );
-							putchar( 'B' );
-							putchar( 'R' );
-							putchar( '>' );
+							switch ( testmode ) {
+							case 2:  /* HTML mode, break with <WBR> tag */
+								putchar( '<' );
+								putchar( 'W' );
+								putchar( 'B' );
+								putchar( 'R' );
+								/* putchar(' ');
+								putchar('/'); */
+								putchar( '>' );
+								break;
+							case 3:  /* Babel Thai LaTeX mode, break with \wbr */
+								putchar( '\\' );
+								putchar( 'w' );
+								putchar( 'b' );
+								putchar( 'r' );
+								putchar( ' ' );
+								break;
+							case 4:  /* Custom boundary marker mode, break with a given marker */
+								for ( k = 0; k < strlen( bmarker ); k++ ) {
+									putchar( bmarker[k] );
+								}
+								break;
+							}
 						} else {
 							if ( HIGHWORD( c ) && !thaimode ) {
 								/* putchar('<');
@@ -564,7 +610,7 @@ int dooneline2sub( unsigned char *in, int offset,
 	int i, j, k, kk, ii;
 	int matchoff;
 	int l, matchsize, count, rval;
-	int matchlist[MAXLINELENGTH];
+	int* matchlist = malloc( sizeof( int ) * MAXLINELENGTH );
 	int tailerror = 9999;    /* Min accumulated error starting from this point */
 	int reterror;
 
@@ -579,6 +625,7 @@ int dooneline2sub( unsigned char *in, int offset,
 		/*
 		if((reterror=get_history(in+offset))!=-1) {
 		printf("D> Seen %d\n", reterror);
+		free(matchlist);
 		return reterror;
 		}
 		*/
@@ -589,10 +636,12 @@ int dooneline2sub( unsigned char *in, int offset,
 				/* Record Match Length */
 				cutlist[cutpoint] = matchoff;
 				reterror = dooneline2sub( in, offset + matchoff, cutlist, cutpoint + 1, curerr, 0 );
-				if ( reterror<tailerror )
+				if ( reterror<tailerror ) {
 					tailerror = reterror;
+				}
 				if ( bStopNow ) {
 					add_history( in + offset, tailerror );
+					free( matchlist );
 					return tailerror;
 				}
 			}
@@ -605,16 +654,19 @@ int dooneline2sub( unsigned char *in, int offset,
 			if ( !flags ) {
 				i = 1;
 				ii = 0;
+
 				while ( i<matchoff ) {
 					if ( !badpos[offset + i] ) {
 						ii++;
 						if ( curerr + ii <= minerr ) { /* No need to do if error increases */
 							cutlist[cutpoint] = -i;
 							reterror = dooneline2sub( in, offset + i, cutlist, cutpoint + 1, curerr + ii, 1 );
-							if ( reterror + ii<tailerror )
+							if ( reterror + ii<tailerror ) {
 								tailerror = reterror + ii;
+							}
 							if ( bStopNow ) {
 								add_history( in + offset, tailerror );
+								free( matchlist );
 								return tailerror;
 							}
 						}
@@ -623,22 +675,26 @@ int dooneline2sub( unsigned char *in, int offset,
 				}
 			}
 		} else { /* Not in dict */
-			if ( !flags )
+			if ( !flags ) {
 				if ( curerr < minerr ) {
 					i = 1;
 					while ( in[offset + i] && badpos[offset + i] )
 						i++;
 					cutlist[cutpoint] = -100 - i;  /* Negative indicates unknown word */
 					reterror = dooneline2sub( in, offset + i, cutlist, cutpoint + 1, curerr + 1, 0 );
-					if ( reterror + 1<tailerror )
+					if ( reterror + 1<tailerror ) {
 						tailerror = reterror + 1;
+					}
 					if ( bStopNow ) {
 						add_history( in + offset, tailerror );
+						free( matchlist );
 						return tailerror;
 					}
 				}
+			}
 		}
 		add_history( in + offset, tailerror );
+		free( matchlist );
 		return tailerror;
 	} else { /* Got a NULL string */
 		k = 0;
@@ -698,6 +754,7 @@ int dooneline2sub( unsigned char *in, int offset,
 
 		/* We found NULL -> No String -> No Error */
 		add_history( in + offset, 0 );
+		free( matchlist );
 		return 0;
 	}
 }

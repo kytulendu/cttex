@@ -37,7 +37,7 @@ tdict.txt: tdict.org tdict.hui huiri.txt fixlist.txt
 	cat tdict.org tdict.hui huiri.txt fixlist.txt | LANG=C  sort | uniq > tdict.txt
 
 clean:
-	rm cttex dictsort dict2state tdict.h map.c map.h digdict *~ *.o \
+	rm cttex dictsort digdict dict2state map.c map.h digdict *~ *.o cttex.exe dictsort.exe digdict.exe dict2state.exe \
 	tdict.sorted tdict.txt
 
 # Change Log
