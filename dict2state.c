@@ -2,10 +2,10 @@
 /* By Vuthichai A.                   */
 
 #define DICTFILE "tdict.txt"
-#define MAXWORD 50000
-#define MAXWORDLENGTH 30
-#define MAXLINELENGTH 400
-#define MAXSTATE 100000
+#define MAXWORD 70000
+#define MAXWORDLENGTH 500
+#define MAXLINELENGTH 500
+#define MAXSTATE 500000
 
 #include <stdio.h>
 #include <string.h>
@@ -29,6 +29,7 @@ int findword( unsigned char * );
 void add2map( unsigned char *, int );
 void initmap( );
 void prmap( );
+void check_headchar( );
 
 unsigned char *wordptr[MAXWORD];
 int numword;                    /* Number of words in memory */
@@ -63,9 +64,29 @@ main( ) {
 		count += state[i];
 	printf( "Word Count: %d %d\n", nn, count );
 	printf( "Min Max Code: %d %d\n", mincol, maxcol );
+
+	/* check_headchar(); */
+
 	rnumword = nn;
 	prmap( );
 	return 0;
+}
+
+/* See if any characters appear only at beginning of
+words */
+
+void check_headchar( ) {
+	int i, ch, sum;
+	for ( ch = 0; ch<96; ch++ ) {
+		sum = 0;
+		for ( i = 1; i<maxstate; i++ ) {
+			if ( map[i][ch] )
+				sum++;
+		}
+		/* sum=0 -> no intra-word occurence */
+		if ( sum == 0 && map[0][ch]>0 )
+			printf( "%d %c sum %d %d\n", ch + 160, ( 160 + ch ), sum, map[0][ch] );
+	}
 }
 
 void readfile( unsigned char *fname ) {
@@ -103,7 +124,7 @@ void readfile( unsigned char *fname ) {
 		}
 	}
 	fclose( fp );
-	printf( "Reading dictionary done.\n" );
+	printf( "Reading dictionary done %d.\n", numword );
 }
 
 
@@ -206,7 +227,7 @@ void prmap( ) {
 	printf( "Writing Map File...\n" );
 
 	FP = fopen( "map.c", "w" );
-	fprintf( FP, "unsigned short map[] = {\n" );
+	fprintf( FP, "int map[] = {\n" );
 	for ( i = 0; i<maxstate; i++ ) {
 		min = max = 0;
 		for ( j = mincol; j <= maxcol; j++ ) {
@@ -266,7 +287,7 @@ void prmap( ) {
 	fprintf( FP, "int mincol = %d;\n", mincol );
 	fprintf( FP, "int maxcol = %d;\n", maxcol );
 	fprintf( FP, "int maxstate = %d;\n", maxstate );
-	fprintf( FP, "extern unsigned short map[%d];\n", offset );
+	fprintf( FP, "extern int map[%d];\n", offset );
 	fprintf( FP, "extern unsigned char state[%d];\n", maxstate );
 	fprintf( FP, "extern unsigned char state_min[%d];\n", maxstate );
 	fprintf( FP, "extern unsigned char state_max[%d];\n", maxstate );

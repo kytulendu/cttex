@@ -4,36 +4,8 @@
 /* Change Log is available at the end of file */
 /* Use "ci -l cttex.c" to add comments        */
 
-/* $Header: /export/home/vuthi/C/cttex121/RCS/cttex.c,v 1.21 1999/05/19 13:23:13 vuthi Exp vuthi $
+/* $Header: /home/cvs/software/cttex/cttex.c,v 1.4 2004/02/24 07:58:27 vuthi Exp $
 */
-
-/* Maximum length of input line */
-#define MAXLINELENGTH 1000
-
-/* Characters to be skipped */
-#define SKIPWORD(x) \
-		(((x)<128) || (((x)<=0xF9)&&((x)>=0xF0)))
-
-/* HIGH Chars */
-#define HIGHWORD(x) \
-		((x)>=128)
-
-/* Check level of a character */
-#define NOTMIDDLE(x) \
-		((x)<0xD0?0:(levtable[(x)-0xD0]!=0))
-
-#define GETLENGTH(x) \
-		((x)<-100?-(x)-100:((x)<0?-(x):(x)))
-
-/* Never change this value. If you do, make sure it's below 255. */
-#define CUTCODE 254
-
-/* Set this one will reduce output size with new TeX */
-#define HIGHBIT 1 
-
-#define LISTSTACKDEPTH 100
-#define CUTLISTSIZE 100
-#define DIFLISTSIZE 100
 
 #include <stdio.h>
 #include <string.h>
@@ -41,14 +13,16 @@
 #include <stdlib.h>
 
 /* Load Dictionary : wordptr & numword */
-#include "map.h"
+#include "global.h"
+#include "cache.h"
+#include "findword.h"
+
+extern int numword;
 
 int dooneline2( unsigned char *, unsigned char * );
-int dooneline2sub( unsigned char *in, int *cutlist, int cutpoint, int, int );
+int dooneline2sub( unsigned char *in, int offset, int *cutlist, int cutpoint, int, int );
 int docut( unsigned char *in, unsigned char *out, int * );
 void adj( unsigned char * );
-void fixline( unsigned char * );
-int findword( unsigned char *, int * );
 int moveleft( int );
 
 void push_stack( int *, int, int );
@@ -59,14 +33,7 @@ void clear_dif( );
 void show_dif( unsigned char * );
 void insert_dif( int, int );
 
-/* Table Look-Up for level of a character */
-/* only those in the range D0-FF */
-int levtable[] = {
-	0, 2, 0, 0, 2, 2, 2, 2, 1, 1, 1, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 2, 3, 3, 3, 3, 3, 2, 3, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0
-};
-
+int badpos[MAXLINELENGTH];
 int cutcode, r_cutcode;
 int bShowAll, debugmode, reportmode, firstmode;
 int bIndexMode, bMinWords;
@@ -99,7 +66,7 @@ char *argv[];
 	reportmode = 0;
 	firstmode = 0;
 
-	fprintf( stderr, "C-TTeX $Revision: 1.21 $\n" );
+	fprintf( stderr, "C-TTeX Revision: 1.30\n" );
 	fprintf( stderr, "cttex -h for help usage.\n" );
 	fprintf( stderr, "Built-in dictionary size: %d words\n", numword );
 
@@ -179,6 +146,12 @@ char *argv[];
 	while ( !feof( fp ) ) {
 		retval = ( unsigned char * ) fgets( ( char * ) str,
 			MAXLINELENGTH - 1, fp );
+
+		if ( strlen( str ) >= MAXLINELENGTH - 1 ) {
+			fprintf( stderr, "Line too Long %d !", strlen( str ) );
+			exit( 1 );
+		}
+
 		if ( !feof( fp ) ) {
 			iLineNumber++;
 			fixline( str );
@@ -294,8 +267,8 @@ char *argv[];
 					j++;
 				}
 			}
-			if ( ( testmode != 1 ) && ( i % 10 == 0 ) )
-				fprintf( stderr, "\r%4d", i );
+			if ( ( testmode != 1 ) && ( iLineNumber % 1 == 0 ) )
+				fprintf( stderr, "\r%4d", iLineNumber );
 		}
 	}
 	if ( testmode != 1 )
@@ -309,80 +282,6 @@ char *argv[];
 	return 0;
 }
 
-/********************************************************/
-/* Find list of words which match  head of given string */
-/********************************************************/
-
-int findword( unsigned char *str, int *matchlist ) {
-	int curstate, i, c, j, ns;
-
-	curstate = i = j = 0;
-	while ( c = str[i] ) {
-		if ( c >= state_min[curstate] && c <= state_max[curstate] ) {
-			if ( ( ns = map[state_offset[curstate] + c - state_min[curstate]] )>0 ) {
-				curstate = ns;
-				if ( state[curstate] )
-					matchlist[j++] = i + 1;
-			} else
-				break;
-		} else
-			break;
-		i++;
-	}
-	ns = j;
-	j = 0;
-
-	/* Remove words which are not followed by a middle alphabet.
-	This can reduce the number of recursive calls in dooneline2sub()
-	by half. */
-	for ( i = 0; i<ns; i++ )
-		if ( !NOTMIDDLE( str[matchlist[i]] ) )
-			matchlist[j++] = matchlist[i];
-	return j;
-}
-
-/************************************************************/
-/* Fix alphabet/vowel order, remove redundant vowels/toners */
-/************************************************************/
-
-void fixline( line )
-unsigned char *line;
-{
-	unsigned char top, up, middle, low;
-	unsigned char *out;
-	int i, j, c;
-
-	i = j = 0;
-
-	out = line; /* Overwrite itself */
-	top = up = middle = low = 0;
-	while ( c = out[i++] ) {
-		switch ( ( c>0xD0 ) ? levtable[c - 0xD0] : 0 ) {
-		case 0:
-			if ( middle ) {
-				line[j++] = middle;
-				if ( low ) line[j++] = low;
-				if ( up )  line[j++] = up;
-				if ( top ) line[j++] = top;
-			}
-			top = up = middle = low = 0;
-			middle = c; break;
-		case 1:
-			low = c; break;
-		case 2:
-			up = c; break;
-		case 3:
-			top = c; break;
-		}
-	}
-	if ( middle ) {
-		line[j++] = middle;
-		if ( low ) line[j++] = low;
-		if ( up )  line[j++] = up;
-		if ( top ) line[j++] = top;
-	}
-	line[j] = 0;
-}
 
 int docut( unsigned char *in, unsigned char *out, int *cutlist ) {
 	int i, j, k, l;
@@ -560,7 +459,26 @@ int moveleft( int c ) {
 	return c;
 }
 
-/* New Recursive Version */
+/* Determine which position cannot start a new word
+(bad cut points) using heuristic rules */
+
+void find_badpos( unsigned char *in ) {
+	int i = 0;
+	while ( in[i] ) {
+		if ( NOTMIDDLE( in[i] ) ||
+			( ( i>0 ) && ( in[i - 1] >= 0xDF && in[i - 1] <= 0xE4 ) ) ||
+			( in[i] >= 0xD0 && in[i] <= 0xD3 )
+			) {
+			badpos[i] = 1;
+		} else
+			badpos[i] = 0;
+		i++;
+	}
+}
+
+/* Split Thai and Non-Thai Phrases,
+forward Thai Phrases to dooneline2sub() */
+
 int dooneline2( unsigned char *in, unsigned char *out ) {
 	int l, i, j, jt, freetemp;
 	int *cutlist;
@@ -568,6 +486,7 @@ int dooneline2( unsigned char *in, unsigned char *out ) {
 	unsigned char stemp[MAXLINELENGTH];
 	int scutlist[MAXLINELENGTH];
 	int sbestcutlist[MAXLINELENGTH];
+	int errorcount;
 
 	i = j = freetemp = 0;
 	temp = stemp;
@@ -584,7 +503,7 @@ int dooneline2( unsigned char *in, unsigned char *out ) {
 
 	jt = 0;
 	while ( in[i] ) {
-		if ( SKIPWORD( in[i] ) ) {
+		if ( SKIPWORD( in[i] ) ) { /* Non-Thai Character */
 			if ( jt ) {
 				temp[jt] = 0;
 				if ( debugmode )
@@ -592,7 +511,12 @@ int dooneline2( unsigned char *in, unsigned char *out ) {
 				mystr = temp;
 				minerr = minword = 9999;
 				bStopNow = 0;
-				dooneline2sub( temp, cutlist, 0, 0, 0 );
+				clear_history( );
+				find_badpos( temp );
+				errorcount = dooneline2sub( temp, 0, cutlist, 0, 0, 0 );
+				if ( debugmode )
+					printf( "Final Err -> %d\n", errorcount );
+
 				if ( bShowAll || bIndexMode )
 					show_stack( temp );
 				j += docut( temp, out + j, bestcutlist );
@@ -610,7 +534,11 @@ int dooneline2( unsigned char *in, unsigned char *out ) {
 		mystr = temp;
 		minerr = minword = 9999;
 		bStopNow = 0;
-		dooneline2sub( temp, cutlist, 0, 0, 0 );
+		clear_history( );
+		find_badpos( temp );
+		errorcount = dooneline2sub( temp, 0, cutlist, 0, 0, 0 );
+		if ( debugmode )
+			printf( "Err->%d\n", errorcount );
 		if ( bShowAll || bIndexMode )
 			show_stack( temp );
 		j += docut( temp, out + j, bestcutlist );
@@ -628,38 +556,67 @@ int dooneline2( unsigned char *in, unsigned char *out ) {
 /* Cut a string which contains only Thai characters */
 /****************************************************/
 
-int dooneline2sub( unsigned char *in, int *cutlist, int cutpoint, int curerr,
-	int flags ) {
+/* flags indicates intentional error has been introduced */
+/* no need to do it again */
+
+int dooneline2sub( unsigned char *in, int offset,
+	int *cutlist, int cutpoint, int curerr, int flags ) {
 	int i, j, k, kk, ii;
 	int matchoff;
 	int l, matchsize, count, rval;
 	int matchlist[MAXLINELENGTH];
+	int tailerror = 9999;    /* Min accumulated error starting from this point */
+	int reterror;
 
-	/*
-	printf("> %s\n", in);
-	*/
+	/* printf("D> %s\n", in); */
+
 	i = j = 0;
-	if ( in[0] ) {
-		if ( ( k = findword( in, matchlist ) ) != 0 ) { /* Found in dict */
+	if ( in[offset] ) {
+		/* This is supposed to speed-up by caching previous results
+		but it causes problem that NULL final part below is not
+		processed properly and, as the result, the text in
+		testfile/problem.txt is not cut correctly */
+		/*
+		if((reterror=get_history(in+offset))!=-1) {
+		printf("D> Seen %d\n", reterror);
+		return reterror;
+		}
+		*/
+
+		if ( ( !badpos[offset] ) && ( ( k = findword( in + offset, matchlist ) ) != 0 ) ) { /* Found in dict */
 			while ( k-- ) {
 				matchoff = matchlist[k];
 				/* Record Match Length */
 				cutlist[cutpoint] = matchoff;
-				dooneline2sub( in + matchoff, cutlist, cutpoint + 1, curerr, 0 );
-				if ( bStopNow )
-					return;
+				reterror = dooneline2sub( in, offset + matchoff, cutlist, cutpoint + 1, curerr, 0 );
+				if ( reterror<tailerror )
+					tailerror = reterror;
+				if ( bStopNow ) {
+					add_history( in + offset, tailerror );
+					return tailerror;
+				}
 			}
+
+			/* Here we have tried known words at all lenghts
+			Keep trying by making it unknown (introducing error)
+			may give lower overall error value. This is done by
+			skipping one character at a time. */
+
 			if ( !flags ) {
 				i = 1;
 				ii = 0;
 				while ( i<matchoff ) {
-					if ( !NOTMIDDLE( in[i] ) ) {
+					if ( !badpos[offset + i] ) {
 						ii++;
-						if ( curerr + ii <= minerr ) {
+						if ( curerr + ii <= minerr ) { /* No need to do if error increases */
 							cutlist[cutpoint] = -i;
-							dooneline2sub( in + i, cutlist, cutpoint + 1, curerr + ii, 1 );
-							if ( bStopNow )
-								return;
+							reterror = dooneline2sub( in, offset + i, cutlist, cutpoint + 1, curerr + ii, 1 );
+							if ( reterror + ii<tailerror )
+								tailerror = reterror + ii;
+							if ( bStopNow ) {
+								add_history( in + offset, tailerror );
+								return tailerror;
+							}
 						}
 					}
 					i++;
@@ -669,15 +626,20 @@ int dooneline2sub( unsigned char *in, int *cutlist, int cutpoint, int curerr,
 			if ( !flags )
 				if ( curerr < minerr ) {
 					i = 1;
-					while ( in[i] && NOTMIDDLE( in[i] ) )
+					while ( in[offset + i] && badpos[offset + i] )
 						i++;
 					cutlist[cutpoint] = -100 - i;  /* Negative indicates unknown word */
-					dooneline2sub( in + i, cutlist, cutpoint + 1, curerr + 1, 0 );
-					if ( bStopNow )
-						return;
+					reterror = dooneline2sub( in, offset + i, cutlist, cutpoint + 1, curerr + 1, 0 );
+					if ( reterror + 1<tailerror )
+						tailerror = reterror + 1;
+					if ( bStopNow ) {
+						add_history( in + offset, tailerror );
+						return tailerror;
+					}
 				}
 		}
-		return curerr;
+		add_history( in + offset, tailerror );
+		return tailerror;
 	} else { /* Got a NULL string */
 		k = 0;
 		if ( curerr<minerr ) {
@@ -703,14 +665,13 @@ int dooneline2sub( unsigned char *in, int *cutlist, int cutpoint, int curerr,
 					putchar( mystr[k++] );
 				putchar( ' ' );
 			}
-		} /* Debug Mode */
+		} /* End Debug Mode */
 		else { /* Not Debug Mode */
 			for ( i = 0; i<cutpoint; i++ ) {
 				if ( cutlist[i]<0 )
 					count--;
 			}
-		} /* Not Debug Mode */
-
+		} /* End Not Debug Mode */
 
 		if ( bShowAll || bIndexMode ) {
 			if ( bMinWords ) {
@@ -734,6 +695,9 @@ int dooneline2sub( unsigned char *in, int *cutlist, int cutpoint, int curerr,
 		/* Stop at first perfect match */
 		if ( curerr == 0 && firstmode )
 			bStopNow = 1;
+
+		/* We found NULL -> No String -> No Error */
+		add_history( in + offset, 0 );
 		return 0;
 	}
 }
@@ -866,6 +830,22 @@ void clear_stack( ) {
 
 /*
 * $Log: cttex.c,v $
+* Revision 1.4  2004/02/24 07:58:27  vuthi
+* Move levtable declaration to findword.h
+* Make digdict faster by finding only words beginning with midlev character.
+*
+* Revision 1.3  2004/02/24 07:48:04  vuthi
+* Separate findword, fixline from cttex to findword.c/.h
+* Develop digdict to find a,b,x,y which satisfies a+b=x+y which
+* can also test a+b+c = x+y or a+b+c = x+y+z too by increasing
+* the allowed depth.
+*
+* Revision 1.2  2003/07/15 08:29:11  vuthi
+* Complete README.note, fix many docs.
+*
+* Revision 1.1  2003/07/15 07:03:27  vuthi
+* First Checkin
+*
 * Revision 1.21  1999/05/19 13:23:13  vuthi
 * Add -i and -m
 * use unsigned short for map[]
