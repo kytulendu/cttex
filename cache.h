@@ -9,7 +9,7 @@
 #define MYEXTERN extern
 #endif
 
-MYEXTERN unsigned char * HistoryList[LISTSTACKDEPTH];
+MYEXTERN unsigned char *HistoryList[LISTSTACKDEPTH];
 MYEXTERN int HistoryErrorCount[LISTSTACKDEPTH];
 MYEXTERN int HistoryPointer;
 

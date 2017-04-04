@@ -8,7 +8,7 @@ void clear_history( ) {
 void add_history( unsigned char *in, int errcount ) {
 	return; /* Because we are not using get_history */
 
-	if ( HistoryPointer <LISTSTACKDEPTH ) {
+	if ( HistoryPointer < LISTSTACKDEPTH ) {
 		HistoryErrorCount[HistoryPointer] = errcount;
 		HistoryList[HistoryPointer] = in;
 		HistoryPointer++;
@@ -20,7 +20,7 @@ void add_history( unsigned char *in, int errcount ) {
 
 int get_history( unsigned char *in ) {
 	int i;
-	for ( i = 0; i<HistoryPointer; i++ ) {
+	for ( i = 0; i < HistoryPointer; i++ ) {
 		if ( in == HistoryList[i] )
 			return HistoryErrorCount[i];
 

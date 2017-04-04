@@ -21,19 +21,19 @@
 
 extern int numword;
 
-int dooneline2( unsigned char *, unsigned char * );
-int dooneline2sub( unsigned char *in, int offset, int *cutlist, int cutpoint, int, int );
-int docut( unsigned char *in, unsigned char *out, int * );
-void adj( unsigned char * );
-int moveleft( int );
+int dooneline2( unsigned char *in, unsigned char *out );
+int dooneline2sub( unsigned char *in, int offset, int *cutlist, int cutpoint, int curerr, int flags );
+int docut( unsigned char *in, unsigned char *out, int *cutlist );
+int moveleft( int c );
 
-void push_stack( int *, int, int );
-void show_stack( unsigned char * );
+void push_stack( int *cutlist, int cutcount, int wordcount );
+void show_stack( unsigned char *str );
 void clear_stack( );
 void check_dif( int *base, int *list, unsigned char *str );
 void clear_dif( );
-void show_dif( unsigned char * );
-void insert_dif( int, int );
+void show_dif( unsigned char *str );
+void adj( unsigned char *line );
+void insert_dif( int start, int stop );
 
 int badpos[MAXLINELENGTH];
 int cutcode, r_cutcode;
@@ -52,16 +52,12 @@ int iDifPtr;
 char *bmarker;
 
 /* main() : Wrapper for Thai LaTeX */
-int main( argc, argv )
-int argc;
-char *argv[];
-{
-	FILE *fp, *fopen( );
+int main( int argc, char *argv[] ) {
+	FILE *fp;
 	unsigned char str[MAXLINELENGTH], out[MAXLINELENGTH];
 	unsigned char *retval;
 	int i, j, k, thaimode, c, cr;
 	int testmode = 0;
-	int ret;
 
 	ListStack = ( int** ) malloc( sizeof( int ) * LISTSTACKDEPTH );
 	ListStack[0] = ( int* ) malloc( sizeof( int ) * LISTSTACKDEPTH * CUTLISTSIZE );
@@ -77,7 +73,7 @@ char *argv[];
 	fprintf( stderr, "cttex -h for help usage.\n" );
 	fprintf( stderr, "Built-in dictionary size: %d words\n", numword );
 
-	for ( i = 1; i<argc; i++ ) {
+	for ( i = 1; i < argc; i++ ) {
 		if ( ( argv[i][0] >= '0' ) && ( argv[i][0] <= '9' ) ) {
 			sscanf( argv[i], "%d", &cutcode );
 			if ( ( cutcode >= 1 ) && ( cutcode <= 253 ) ) {	/* Test with given code */
@@ -126,7 +122,7 @@ char *argv[];
 				cutcode = CUTCODE;
 				testmode = 4;
 				i++;
-				if ( i<argc ) {
+				if ( i < argc ) {
 					bmarker = ( char* ) malloc( sizeof( char ) * ( strlen( argv[i] ) + 1 ) );
 					strcpy( bmarker, argv[i] );
 					fprintf( stderr, "Custom boundary marker mode, marker = %s\n", bmarker );
@@ -172,8 +168,7 @@ char *argv[];
 	fp = stdin;
 	thaimode = cr = 0;
 	while ( !feof( fp ) ) {
-		retval = ( unsigned char * ) fgets( ( char * ) str,
-			MAXLINELENGTH - 1, fp );
+		retval = ( unsigned char * ) fgets( ( char * ) str, MAXLINELENGTH - 1, fp );
 
 		if ( strlen( str ) >= MAXLINELENGTH - 1 ) {
 			fprintf( stderr, "Line too Long %d !", strlen( str ) );
@@ -189,8 +184,9 @@ char *argv[];
 					/* Change cutcode to r_cutcode */
 					j = strlen( ( char * ) out );
 					while ( j >= 0 ) {
-						if ( out[j] == cutcode )
+						if ( out[j] == cutcode ) {
 							out[j] = r_cutcode;
+						}
 						j--;
 					}
 					printf( "%s", out );
@@ -280,32 +276,30 @@ char *argv[];
 							putchar( c );
 							thaimode = 0;
 						} else {                    /* Remain in ThaiMode */
-							if ( c == CUTCODE )
-								printf( "\\tb " );
-							else {
-								if ( HIGHBIT )
-									putchar( c );
-								else
-									printf( "\\c%03d", c );
-							}
-						}
-					}
-
-					/* Not ThaiMode */
-					else {
-						if ( !HIGHWORD( c ) )          /* Just print it out */
-							putchar( c );
-						else {                    /* A Thai Char detected */
-							if ( c == CUTCODE ) {        /* Just in case */
-								fprintf( stderr, "\nCutCode found before Thai Characters\n" );
-								fprintf( stderr, "Line %d : BUG !! : Please report\n",
-									iLineNumber );
+							if ( c == CUTCODE ) {
 								printf( "\\tb " );
 							} else {
-								if ( HIGHBIT )
+								if ( HIGHBIT ) {
+									putchar( c );
+								} else {
+									printf( "\\c%03d", c );
+								}
+							}
+						}
+					} else { /* Not ThaiMode */
+						if ( !HIGHWORD( c ) ) {          /* Just print it out */
+							putchar( c );
+						} else {                    /* A Thai Char detected */
+							if ( c == CUTCODE ) {        /* Just in case */
+								fprintf( stderr, "\nCutCode found before Thai Characters\n" );
+								fprintf( stderr, "Line %d : BUG !! : Please report\n", iLineNumber );
+								printf( "\\tb " );
+							} else {
+								if ( HIGHBIT ) {
 									printf( "{\\thai %c", c );
-								else
+								} else {
 									printf( "{\\thai\\c%03d", c );
+								}
 							}
 							thaimode = 1;
 						}
@@ -313,12 +307,14 @@ char *argv[];
 					j++;
 				}
 			}
-			if ( ( testmode != 1 ) && ( iLineNumber % 1 == 0 ) )
+			if ( ( testmode != 1 ) && ( iLineNumber % 1 == 0 ) ) {
 				fprintf( stderr, "\r%4d", iLineNumber );
+			}
 		}
 	}
-	if ( testmode != 1 )
+	if ( testmode != 1 ) {
 		fprintf( stderr, "\r%4d\n", i );
+	}
 	if ( cr && thaimode ) {
 		putchar( '}' );
 		putchar( '\n' );
@@ -328,57 +324,70 @@ char *argv[];
 	return 0;
 }
 
-
 int docut( unsigned char *in, unsigned char *out, int *cutlist ) {
 	int i, j, k, l;
-
 	/*
-	printf("%s\n", in);
-	for(i=0;i<4;i++)
-	printf("cut at %d\n", cutlist[i]);
+	printf( "%s\n", in );
+	for ( i = 0; i < 4; i++ ) {
+		printf( "cut at %d\n", cutlist[i] );
+	}
 	*/
 	if ( reportmode ) {  /* Print Unknown Words */
 		i = k = 0;
 		while ( in[i] ) {
 			l = cutlist[k];
-			if ( l<0 ) {
-				if ( k && ( j = cutlist[k - 1] )>0 ) {
+			if ( l < 0 ) {
+				if ( k && ( j = cutlist[k - 1] ) > 0 ) {
 					fprintf( stderr, "%d: ", iLineNumber );
 					while ( j ) {
 						fputc( in[i - j], stderr );
 						j--;
 					}
 				}
-				if ( l<-100 ) l = -l - 100; else l = -l;
-				while ( l-- )
+				if ( l < -100 ) {
+					l = -l - 100;
+				} else {
+					l = -l;
+				}
+				while ( l-- ) {
 					fputc( in[i++], stderr );
+				}
 			} else {
 				i += l;
-				if ( k && ( j = cutlist[k - 1] )<0 )
+				if ( k && ( j = cutlist[k - 1] ) < 0 ) {
 					fputc( '\n', stderr );
+				}
 			}
 			k++;
 		} /* while */
-		if ( cutlist[k - 1]<0 )
+		if ( cutlist[k - 1] < 0 ) {
 			fputc( '\n', stderr );
+		}
 	}
 
 	i = j = k = 0;
 	while ( in[i] ) {
 		l = cutlist[k];
 		if ( l<0 ) {
-			if ( k )     /* Remove prev break */
+			if ( k ) {     /* Remove prev break */
 				j--;
-			if ( l<-100 ) l = -l - 100; else l = -l;
+			}
+			if ( l < -100 ) {
+				l = -l - 100;
+			} else {
+				l = -l;
+			}
 		}
 
 		if ( in[i] == 230 && j ) {  /* Must not break before Mai-Ya-Mok */
 			j--;
 		}
-		while ( l-- )
+		while ( l-- ) {
 			out[j++] = in[i++];
-		if ( in[i] )
+		}
+		if ( in[i] ) {
 			out[j++] = cutcode;
+		}
 		k++;
 	}
 	out[j] = 0;
@@ -399,12 +408,13 @@ void adj( unsigned char *line ) {
 
 	/* Split string into 4 levels */
 	/* Clear Buffer */
-	for ( i = 0; i<MAXLINELENGTH; i++ )
+	for ( i = 0; i < MAXLINELENGTH; i++ ) {
 		top[i] = up[i] = middle[i] = low[i] = 0;
+	}
 
 	i = 0; k = -1;
 	while ( ( c = line[i++] ) != 0 ) {
-		switch ( ( c>0xD0 ) ? levtable[c - 0xD0] : 0 ) {
+		switch ( ( c > 0xD0 ) ? levtable[c - 0xD0] : 0 ) {
 		case 0: /*Middle*/
 			/* Special Case for Sara-Am */
 			if ( c == 0xD3 ) {
@@ -440,24 +450,29 @@ void adj( unsigned char *line ) {
 		if ( middle[i] == 0xBB ||           /* Por Pla */
 			middle[i] == 0xBD ||           /* For Far */
 			middle[i] == 0xBF ) {          /* For Fun */
-			if ( up[i] )
+			if ( up[i] ) {
 				up[i] = moveleft( up[i] );
-			if ( top[i] )
+			}
+			if ( top[i] ) {
 				top[i] = moveleft( top[i] );
+			}
 		}
 
 		/* Remove lower part of TorSanTan and YorPhuYing
 		if necessary */
-		if ( middle[i] == 0xB0 && low[i] )    /* TorSanTan */
+		if ( middle[i] == 0xB0 && low[i] ) {    /* TorSanTan */
 			middle[i] = 0x9F;
-		if ( middle[i] == 0xAD && low[i] )    /* YorPhuYing */
+		}
+		if ( middle[i] == 0xAD && low[i] ) {    /* YorPhuYing */
 			middle[i] = 0x90;
+		}
 
 		/* Move lower sara down , for DorChaDa, TorPaTak */
 		if ( middle[i] == 0xAE ||
 			middle[i] == 0xAF ) {
-			if ( low[i] )
+			if ( low[i] ) {
 				low[i] = low[i] + 36;
+			}
 		}
 	}
 
@@ -465,9 +480,9 @@ void adj( unsigned char *line ) {
 	i = 0; k = 0;
 	while ( middle[i] ) {
 		line[k++] = middle[i];
-		if ( low[i] ) line[k++] = low[i];
-		if ( up[i] )  line[k++] = up[i];
-		if ( top[i] ) line[k++] = top[i];
+		if ( low[i] ) { line[k++] = low[i]; }
+		if ( up[i] ) { line[k++] = up[i]; }
+		if ( top[i] ) { line[k++] = top[i]; }
 		i++;
 	}
 
@@ -498,9 +513,10 @@ int lefttab[] = {
 int moveleft( int c ) {
 	int i;
 
-	for ( i = 0; i<34; i += 2 ) {
-		if ( lefttab[i] == c )
+	for ( i = 0; i < 34; i += 2 ) {
+		if ( lefttab[i] == c ) {
 			return lefttab[i + 1];
+		}
 	}
 	return c;
 }
@@ -516,8 +532,9 @@ void find_badpos( unsigned char *in ) {
 			( in[i] >= 0xD0 && in[i] <= 0xD3 )
 			) {
 			badpos[i] = 1;
-		} else
+		} else {
 			badpos[i] = 0;
+		}
 		i++;
 	}
 }
@@ -542,8 +559,8 @@ int dooneline2( unsigned char *in, unsigned char *out ) {
 	/* Allocate from Heap if the line is too long */
 	if ( l>MAXLINELENGTH ) {
 		temp = malloc( l + 1 );
-		cutlist = malloc( sizeof( int )*l );
-		bestcutlist = malloc( sizeof( int )*l );
+		cutlist = malloc( sizeof( int ) * l );
+		bestcutlist = malloc( sizeof( int ) * l );
 		freetemp = 1;
 	}
 
@@ -552,19 +569,22 @@ int dooneline2( unsigned char *in, unsigned char *out ) {
 		if ( SKIPWORD( in[i] ) ) { /* Non-Thai Character */
 			if ( jt ) {
 				temp[jt] = 0;
-				if ( debugmode )
+				if ( debugmode ) {
 					printf( "->%s\n", temp );
+				}
 				mystr = temp;
 				minerr = minword = 9999;
 				bStopNow = 0;
 				clear_history( );
 				find_badpos( temp );
 				errorcount = dooneline2sub( temp, 0, cutlist, 0, 0, 0 );
-				if ( debugmode )
+				if ( debugmode ) {
 					printf( "Final Err -> %d\n", errorcount );
+				}
 
-				if ( bShowAll || bIndexMode )
+				if ( bShowAll || bIndexMode ) {
 					show_stack( temp );
+				}
 				j += docut( temp, out + j, bestcutlist );
 				jt = 0;
 			}
@@ -575,18 +595,21 @@ int dooneline2( unsigned char *in, unsigned char *out ) {
 	}
 	if ( jt ) {
 		temp[jt] = 0;
-		if ( debugmode )
+		if ( debugmode ) {
 			printf( "->%s\n", temp );
+		}
 		mystr = temp;
 		minerr = minword = 9999;
 		bStopNow = 0;
 		clear_history( );
 		find_badpos( temp );
 		errorcount = dooneline2sub( temp, 0, cutlist, 0, 0, 0 );
-		if ( debugmode )
+		if ( debugmode ) {
 			printf( "Err->%d\n", errorcount );
-		if ( bShowAll || bIndexMode )
+		}
+		if ( bShowAll || bIndexMode ) {
 			show_stack( temp );
+		}
 		j += docut( temp, out + j, bestcutlist );
 	}
 	out[j] = 0;
@@ -607,9 +630,9 @@ int dooneline2( unsigned char *in, unsigned char *out ) {
 
 int dooneline2sub( unsigned char *in, int offset,
 	int *cutlist, int cutpoint, int curerr, int flags ) {
-	int i, j, k, kk, ii;
+	int i, j, k, ii;
 	int matchoff;
-	int l, matchsize, count, rval;
+	int l, count;
 	int* matchlist = malloc( sizeof( int ) * MAXLINELENGTH );
 	int tailerror = 9999;    /* Min accumulated error starting from this point */
 	int reterror;
@@ -623,10 +646,10 @@ int dooneline2sub( unsigned char *in, int offset,
 		processed properly and, as the result, the text in
 		testfile/problem.txt is not cut correctly */
 		/*
-		if((reterror=get_history(in+offset))!=-1) {
-		printf("D> Seen %d\n", reterror);
-		free(matchlist);
-		return reterror;
+		if ( ( reterror = get_history( in + offset ) ) != -1 ) {
+			printf( "D> Seen %d\n", reterror );
+			free( matchlist );
+			return reterror;
 		}
 		*/
 
@@ -655,7 +678,7 @@ int dooneline2sub( unsigned char *in, int offset,
 				i = 1;
 				ii = 0;
 
-				while ( i<matchoff ) {
+				while ( i < matchoff ) {
 					if ( !badpos[offset + i] ) {
 						ii++;
 						if ( curerr + ii <= minerr ) { /* No need to do if error increases */
@@ -678,8 +701,9 @@ int dooneline2sub( unsigned char *in, int offset,
 			if ( !flags ) {
 				if ( curerr < minerr ) {
 					i = 1;
-					while ( in[offset + i] && badpos[offset + i] )
+					while ( in[offset + i] && badpos[offset + i] ) {
 						i++;
+					}
 					cutlist[cutpoint] = -100 - i;  /* Negative indicates unknown word */
 					reterror = dooneline2sub( in, offset + i, cutlist, cutpoint + 1, curerr + 1, 0 );
 					if ( reterror + 1<tailerror ) {
@@ -698,7 +722,7 @@ int dooneline2sub( unsigned char *in, int offset,
 		return tailerror;
 	} else { /* Got a NULL string */
 		k = 0;
-		if ( curerr<minerr ) {
+		if ( curerr < minerr ) {
 			minword = 9999;
 			minerr = curerr;
 			clear_stack( );
@@ -707,50 +731,58 @@ int dooneline2sub( unsigned char *in, int offset,
 
 		if ( debugmode ) { /* Debug Mode */
 			putchar( '=' );
-			for ( i = 0; i<cutpoint; i++ ) {
+			for ( i = 0; i < cutpoint; i++ ) {
 				l = cutlist[i];
-				if ( l<-100 ) {
+				if ( l < -100 ) {
 					putchar( '*' );
 					l = -l - 100; count--;
 				}
-				if ( l<0 ) {
+				if ( l < 0 ) {
 					putchar( '#' );
 					l = -l; count--;
 				}
-				for ( j = 0; j<l; j++ )
+				for ( j = 0; j < l; j++ ) {
 					putchar( mystr[k++] );
+				}
 				putchar( ' ' );
 			}
 		} /* End Debug Mode */
 		else { /* Not Debug Mode */
 			for ( i = 0; i<cutpoint; i++ ) {
-				if ( cutlist[i]<0 )
+				if ( cutlist[i] < 0 ) {
 					count--;
+				}
 			}
 		} /* End Not Debug Mode */
 
 		if ( bShowAll || bIndexMode ) {
 			if ( bMinWords ) {
-				if ( count < minword )
+				if ( count < minword ) {
 					clear_stack( );
-				if ( count <= minword )
+				}
+				if ( count <= minword ) {
 					push_stack( cutlist, cutpoint, count );
-			} else
+				}
+			} else {
 				push_stack( cutlist, cutpoint, count );
+			}
 		}
 
 		if ( count <= minword ) {
 			minword = count;
-			for ( i = 0; i<cutpoint; i++ )
+			for ( i = 0; i < cutpoint; i++ ) {
 				bestcutlist[i] = cutlist[i];
+			}
 		}
 
-		if ( debugmode )
+		if ( debugmode ) {
 			printf( "Err(%d) Word(%d)\n", minerr, count );
+		}
 
 		/* Stop at first perfect match */
-		if ( curerr == 0 && firstmode )
+		if ( curerr == 0 && firstmode ) {
 			bStopNow = 1;
+		}
 
 		/* We found NULL -> No String -> No Error */
 		add_history( in + offset, 0 );
@@ -762,8 +794,8 @@ int dooneline2sub( unsigned char *in, int offset,
 void push_stack( int *cutlist, int cutcount, int wordcount ) {
 	int i;
 
-	if ( iListStackPointer<LISTSTACKDEPTH ) {
-		for ( i = 0; i<cutcount; i++ ) {
+	if ( iListStackPointer < LISTSTACKDEPTH ) {
+		for ( i = 0; i < cutcount; i++ ) {
 			ListStack[iListStackPointer][i] = cutlist[i];
 		}
 		ListStack[iListStackPointer][CUTLISTSIZE - 1] = wordcount;
@@ -778,24 +810,29 @@ void show_stack( unsigned char *str ) {
 	unsigned char *temp;
 
 	temp = malloc( strlen( ( char * ) str ) * 2 );
-	if ( bIndexMode )
+	if ( bIndexMode ) {
 		clear_dif( );
+	}
 	for ( i = 0; i<iListStackPointer; i++ ) {
 		docut( str, temp, ListStack[i] );
 		j = 0;
 		while ( temp[j] ) {
-			if ( temp[j] == cutcode )
+			if ( temp[j] == cutcode ) {
 				temp[j] = 32;
+			}
 			j++;
 		}
-		if ( bShowAll )
+		if ( bShowAll ) {
 			printf( "%d[%d]: %s\n", i,
-			ListStack[i][CUTLISTSIZE - 1], temp );
-		if ( bIndexMode )
+				ListStack[i][CUTLISTSIZE - 1], temp );
+		}
+		if ( bIndexMode ) {
 			check_dif( bestcutlist, ListStack[i], str );
+		}
 	}
-	if ( bIndexMode )
+	if ( bIndexMode ) {
 		show_dif( str );
+	}
 	free( temp );
 }
 
@@ -851,14 +888,16 @@ void show_dif( unsigned char *str ) {
 	i = 0;
 	while ( i<iDifPtr ) {
 		start = piDifList[i];
-		while ( start < piDifList[i + 1] )
+		while ( start < piDifList[i + 1] ) {
 			fputc( str[start++], stdout );
+		}
 		fputc( ':', stdout );
 		i += 2;
 	}
 	/*
-	if(iDifPtr)
-	fputc('\n',stdout);
+	if ( iDifPtr ) {
+		fputc( '\n', stdout );
+	}
 	*/
 }
 
@@ -866,10 +905,11 @@ void show_dif( unsigned char *str ) {
 void insert_dif( int start, int stop ) {
 	int i;
 	i = 0;
-	while ( i<iDifPtr ) {
+	while ( i < iDifPtr ) {
 		if ( start == piDifList[i] &&
-			stop == piDifList[i + 1] )
+			stop == piDifList[i + 1] ) {
 			return;
+		}
 		i += 2;
 	}
 	piDifList[i] = start;
